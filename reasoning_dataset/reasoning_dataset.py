@@ -105,10 +105,11 @@ class ReasoningChainDataset(Dataset):
 
         prefix = self.chat_template.format(question=question)
         prefix_ids: list[int] = self.tokenizer(prefix).input_ids
+        prefix_ids = prefix_ids[:self.max_length - 1]
         assistant_offset = len(prefix_ids)
         max_length = self.max_length - assistant_offset
-        if max_length < self.max_length // 2:
-            return None
+        # if max_length < self.max_length // 2:
+        #     return None
 
         chunks: list[dict[str, Any]] = []
         for chunk_start in range(0, len(input_ids), max_length):
