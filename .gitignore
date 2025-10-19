@@ -1,0 +1,15 @@
+__pycache__/
+.DS_Store
+.vscode/
+.cursor/
+wandb/
+data/
+cache/
+plots/
+data_bk/
+results/
+draft.*
+*.egg-info
+*.pyc
+*.swp
+reasoning_dataset/annotated_dataset.json
