@@ -139,7 +139,7 @@ def run_probing_experiment(
     # Get input dimension from first sample
     sample = dataset[0]
     input_dim = sample['original'].shape[0]
-    num_classes = 2 if label_type == 'binary' else 6
+    num_classes = 2 if label_type == 'binary' else 7  # 7 classes for fine-grained: 0=non-reasoning, 1-6=reasoning types
     
     print(f"\nProbe configuration:")
     print(f"  Input dim: {input_dim}")
@@ -213,7 +213,7 @@ def run_probing_experiment(
         
         # Plot confusion matrix
         class_names = ['Non-Reasoning', 'Reasoning'] if num_classes == 2 else [
-            'Initializing', 'Deduction', 'Adding Knowledge',
+            'Non-Reasoning', 'Initializing', 'Deduction', 'Adding Knowledge',
             'Example Testing', 'Uncertainty Estimation', 'Backtracking'
         ]
         cm_path = save_dir / f'confusion_matrix_{act_type}.png'

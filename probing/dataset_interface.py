@@ -243,13 +243,15 @@ class ActivationDatasetBuilder:
         all_tokens = []
         all_labels = []
         
+        # Label 0 is reserved for non-reasoning samples
+        # Reasoning types get labels 1-6
         label_map = {
-            'initializing': 0,
-            'deduction': 1,
-            'adding-knowledge': 2,
-            'example-testing': 3,
-            'uncertainty-estimation': 4,
-            'backtracking': 5,
+            'initializing': 1,
+            'deduction': 2,
+            'adding-knowledge': 3,
+            'example-testing': 4,
+            'uncertainty-estimation': 5,
+            'backtracking': 6,
         }
         
         for i in range(len(reasoning_dataset)):
@@ -269,9 +271,9 @@ class ActivationDatasetBuilder:
                         set(p['label'] for p in part_infos),
                         key=lambda l: sum(1 for p in part_infos if p['label'] == l)
                     )
-                    all_labels.append(label_map.get(most_common_label, 0))
+                    all_labels.append(label_map.get(most_common_label, 1))  # Default to 'initializing' if unknown
                 else:
-                    all_labels.append(0)
+                    all_labels.append(1)  # Default to 'initializing' if no part_infos
             else:
                 # Binary: just mark as reasoning (1)
                 all_labels.append(1)
