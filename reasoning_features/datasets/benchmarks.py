@@ -165,4 +165,3 @@ def get_benchmark(
         raise ValueError(f"Unknown benchmark: {name}. Available: {list(benchmarks.keys())}")
     
     return benchmarks[name]()
-

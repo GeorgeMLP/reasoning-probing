@@ -64,4 +64,3 @@ class PileDataset(BaseDataset):
                 break
         
         return samples
-

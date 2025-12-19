@@ -4,6 +4,7 @@ from .collector import FeatureCollector, FeatureActivations
 from .detector import ReasoningFeatureDetector, FeatureStats
 from .tokens import TopTokenAnalyzer, TokenFeatureAssociation
 
+
 __all__ = [
     "FeatureCollector",
     "FeatureActivations",

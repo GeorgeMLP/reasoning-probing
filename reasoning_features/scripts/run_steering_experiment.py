@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Run steering experiments to test whether amplifying reasoning features improves performance.
 
@@ -43,16 +42,10 @@ import json
 from pathlib import Path
 import sys
 
-import torch
-
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from reasoning_features.steering import (
-    FeatureSteerer,
-    SteeringConfig,
-    BenchmarkEvaluator,
-)
+from reasoning_features.steering import BenchmarkEvaluator
 from reasoning_features.steering.evaluator import load_model_and_sae
 
 
@@ -324,4 +317,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

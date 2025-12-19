@@ -14,7 +14,6 @@ import tqdm
 
 from sae_lens import SAE, HookedSAETransformer
 
-from ..datasets.base import BaseBenchmark
 from ..datasets.benchmarks import get_benchmark
 from .steerer import FeatureSteerer, SteeringConfig
 
@@ -374,4 +373,3 @@ def load_model_and_sae(
     )
     
     return model, sae
-

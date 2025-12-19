@@ -10,7 +10,6 @@ from typing import Optional, Callable
 import torch
 from torch import Tensor
 from jaxtyping import Float
-import functools
 
 from sae_lens import SAE, HookedSAETransformer
 
@@ -97,7 +96,10 @@ class FeatureSteerer:
     ) -> Callable:
         """Create a hook function that modifies SAE feature activations."""
         
-        def steering_hook(activations: Tensor, hook) -> Tensor:
+        def steering_hook(
+            activations: Float[Tensor, "batch seq d_model"],
+            hook,
+        ) -> Float[Tensor, "batch seq d_model"]:
             """Hook that modifies activations via SAE encode/decode."""
             # Get original shape
             original_shape = activations.shape
@@ -330,4 +332,3 @@ class MultiLayerSteerer:
         finally:
             for steerer in self.steerers.values():
                 steerer._clear_hooks()
-

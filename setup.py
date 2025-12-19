@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="reasoning-probing",
+    name="reasoning-features",
     packages=find_packages(),
     version="0.0.1",
     author="George Ma",

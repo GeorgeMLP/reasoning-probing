@@ -8,10 +8,6 @@ that show differential activation between reasoning and non-reasoning text.
 from dataclasses import dataclass, field
 from typing import Optional
 import numpy as np
-import torch
-from torch import Tensor
-from jaxtyping import Float
-from scipy import stats
 from scipy.stats import mannwhitneyu, ttest_ind
 from sklearn.metrics import roc_auc_score
 import warnings
@@ -337,4 +333,3 @@ class ReasoningFeatureDetector:
             "mean_auc_reasoning_features": np.mean([s.roc_auc for s in reasoning_features]) if reasoning_features else 0,
             "mean_cohens_d_reasoning_features": np.mean([s.cohens_d for s in reasoning_features]) if reasoning_features else 0,
         }
-

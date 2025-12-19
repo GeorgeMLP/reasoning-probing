@@ -7,6 +7,27 @@ from datasets import load_dataset
 from .base import BaseDataset, TextSample
 
 
+class CombinedDataset(BaseDataset):
+    """
+    A dataset that combines multiple datasets.
+    
+    This is a simple wrapper that doesn't load from external sources,
+    but instead combines already-loaded datasets.
+    """
+    
+    def __init__(self, datasets: list[BaseDataset], max_samples: Optional[int] = None):
+        super().__init__(max_samples)
+        self.datasets = datasets
+    
+    def _load_samples(self) -> list[TextSample]:
+        """Combine samples from all datasets."""
+        all_samples = []
+        for dataset in self.datasets:
+            dataset.load()
+            all_samples.extend(dataset._samples)
+        return all_samples
+
+
 class S1KDataset(BaseDataset):
     """
     Loader for the s1K-1.1 dataset (simplescaling/s1K-1.1).
@@ -180,17 +201,6 @@ def get_reasoning_dataset(
         # Combine both datasets
         s1k = S1KDataset(max_samples=max_samples // 2 if max_samples else None, **kwargs)
         giq = GeneralInquiryCoTDataset(max_samples=max_samples // 2 if max_samples else None, **kwargs)
-        s1k.load()
-        giq.load()
-        
-        # Create a combined dataset
-        combined = BaseDataset.__new__(BaseDataset)
-        combined._samples = s1k._samples + giq._samples
-        combined._loaded = True
-        combined.max_samples = max_samples
-        if max_samples and len(combined._samples) > max_samples:
-            combined._samples = combined._samples[:max_samples]
-        return combined
+        return CombinedDataset([s1k, giq], max_samples=max_samples)
     else:
         raise ValueError(f"Unknown reasoning dataset: {name}")
-

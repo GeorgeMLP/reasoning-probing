@@ -189,7 +189,7 @@ class FeatureCollector:
         all_activations = []
         n_samples = tokens.shape[0]
         
-        hook_name = self.sae.cfg.hook_name
+        hook_name = self.sae.cfg.metadata.hook_name
         
         with tqdm.tqdm(total=n_samples, desc="Collecting activations") as pbar:
             for i in range(0, n_samples, batch_size):
@@ -210,9 +210,9 @@ class FeatureCollector:
                 
                 all_activations.append(acts.cpu().float())
                 
+                pbar.update(len(batch))
                 del cache, batch
                 torch.cuda.empty_cache()
-                pbar.update(len(batch))
         
         activations = torch.cat(all_activations, dim=0)
         
@@ -280,4 +280,3 @@ class FeatureCollector:
             batch_size=batch_size,
             max_features=max_features,
         )
-

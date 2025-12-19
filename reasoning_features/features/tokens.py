@@ -7,12 +7,8 @@ deeper reasoning patterns.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 from collections import defaultdict
 import numpy as np
-import torch
-from torch import Tensor
-from jaxtyping import Float, Int
 from transformers import PreTrainedTokenizerBase
 
 from .collector import FeatureActivations
@@ -348,4 +344,3 @@ class TopTokenAnalyzer:
                 pass
         
         return vocab
-

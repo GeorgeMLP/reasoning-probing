@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Find reasoning-correlated features in SAE layers.
 
@@ -45,9 +44,6 @@ import argparse
 import json
 from pathlib import Path
 import sys
-
-import torch
-import numpy as np
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -403,4 +399,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
