@@ -305,7 +305,7 @@ class TopTokenAnalyzer:
             "top_tokens": [t.to_dict() for t in top_tokens],
             "token_concentration": token_concentration,
             "normalized_entropy": normalized_entropy,
-            "is_token_dependent": token_concentration > 0.5,  # >50% from top tokens
+            "is_token_dependent": bool(token_concentration > 0.5),  # >50% from top tokens
             "interpretation": (
                 "HIGH token dependency - likely shallow cue" 
                 if token_concentration > 0.5 
