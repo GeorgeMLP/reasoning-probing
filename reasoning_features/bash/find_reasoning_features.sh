@@ -19,14 +19,3 @@ for layer in 0 4 8 12 16 20 24; do
         --save-dir results/initial-setting/gemma-2-2b/general_inquiry_cot/layer$layer \
         --batch-size 32
 done
-
-for layer in 0 4 8 12 16 20 24; do
-    python reasoning_features/scripts/find_reasoning_features.py \
-        --layer $layer \
-        --reasoning-dataset combined \
-        --reasoning-samples 8000 \
-        --nonreasoning-samples 8000 \
-        --max-length 64 \
-        --save-dir results/initial-setting/gemma-2-2b/combined/layer$layer \
-        --batch-size 32
-done

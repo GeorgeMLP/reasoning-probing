@@ -166,6 +166,11 @@ def parse_args():
         help="Directory to save results",
     )
     parser.add_argument(
+        "--save-activations",
+        action="store_true",
+        help="Save activations to file",
+    )
+    parser.add_argument(
         "--load-activations",
         type=Path,
         default=None,
@@ -243,7 +248,7 @@ def main():
         )
         
         # Save activations if requested
-        if args.save_dir:
+        if args.save_dir and args.save_activations:
             act_path = args.save_dir / "activations.pt"
             activations.save(act_path)
             print(f"Saved activations to {act_path}")
@@ -375,8 +380,35 @@ def main():
         
         # Save token analysis
         tokens_path = args.save_dir / "token_analysis.json"
+        
+        # Compute summary statistics
+        token_analysis_summary = {
+            "total_features_analyzed": len(feature_token_analyses),
+            "high_token_dependency_count": sum(
+                1 for a in feature_token_analyses if a["token_concentration"] > 0.5
+            ),
+            "high_token_dependency_percentage": (
+                sum(1 for a in feature_token_analyses if a["token_concentration"] > 0.5) 
+                / len(feature_token_analyses) * 100
+                if feature_token_analyses else 0
+            ),
+            "mean_token_concentration": (
+                sum(a["token_concentration"] for a in feature_token_analyses) 
+                / len(feature_token_analyses)
+                if feature_token_analyses else 0
+            ),
+            "mean_normalized_entropy": (
+                sum(a["normalized_entropy"] for a in feature_token_analyses) 
+                / len(feature_token_analyses)
+                if feature_token_analyses else 0
+            ),
+        }
+        
         with open(tokens_path, "w") as f:
-            json.dump(feature_token_analyses, f, indent=2)
+            json.dump({
+                "summary": token_analysis_summary,
+                "features": feature_token_analyses,
+            }, f, indent=2)
         print(f"Saved token analysis to {tokens_path}")
     
     # Final summary

@@ -30,6 +30,8 @@ class TokenFeatureAssociation:
     mean_activation: float  # Mean feature activation when token appears
     max_activation: float  # Max feature activation when token appears
     occurrence_count: int  # How many times token appears in dataset
+    occurrence_count_reasoning: int  # Occurrences in reasoning samples
+    occurrence_count_nonreasoning: int  # Occurrences in non-reasoning samples
     
     # Association metrics
     pmi: float  # Pointwise Mutual Information
@@ -48,6 +50,8 @@ class TokenFeatureAssociation:
             "mean_activation": self.mean_activation,
             "max_activation": self.max_activation,
             "occurrence_count": self.occurrence_count,
+            "occurrence_count_reasoning": self.occurrence_count_reasoning,
+            "occurrence_count_nonreasoning": self.occurrence_count_nonreasoning,
             "pmi": self.pmi,
             "activation_ratio": self.activation_ratio,
             "mean_activation_in_reasoning": self.mean_activation_in_reasoning,
@@ -149,6 +153,8 @@ class TopTokenAnalyzer:
             token_acts = []
             token_acts_reasoning = []
             token_acts_nonreasoning = []
+            count_reasoning = 0
+            count_nonreasoning = 0
             
             for sample_idx, pos in positions:
                 act = acts[sample_idx, pos]
@@ -156,8 +162,10 @@ class TopTokenAnalyzer:
                 
                 if reasoning_mask[sample_idx]:
                     token_acts_reasoning.append(act)
+                    count_reasoning += 1
                 else:
                     token_acts_nonreasoning.append(act)
+                    count_nonreasoning += 1
             
             token_acts = np.array(token_acts)
             
@@ -200,6 +208,8 @@ class TopTokenAnalyzer:
                 mean_activation=mean_act,
                 max_activation=max_act,
                 occurrence_count=len(positions),
+                occurrence_count_reasoning=count_reasoning,
+                occurrence_count_nonreasoning=count_nonreasoning,
                 pmi=float(pmi) if not np.isinf(pmi) else -100.0,
                 activation_ratio=float(activation_ratio),
                 mean_activation_in_reasoning=float(mean_reasoning),
