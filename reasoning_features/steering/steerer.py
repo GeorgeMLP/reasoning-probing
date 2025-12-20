@@ -87,8 +87,8 @@ class FeatureSteerer:
         """
         self.model = model
         self.sae = sae
-        self.hook_name = sae.cfg.hook_name
-        self._active_hooks = []
+        self.hook_name = sae.cfg.metadata.hook_name
+        self._hooks_active = False
     
     def _create_steering_hook(
         self,
@@ -140,14 +140,14 @@ class FeatureSteerer:
     def _register_hook(self, config: SteeringConfig):
         """Register the steering hook."""
         hook_fn = self._create_steering_hook(config)
-        handle = self.model.add_hook(self.hook_name, hook_fn)
-        self._active_hooks.append(handle)
+        self.model.add_hook(self.hook_name, hook_fn)
+        self._hooks_active = True
     
     def _clear_hooks(self):
         """Remove all active hooks."""
-        for handle in self._active_hooks:
-            handle.remove()
-        self._active_hooks = []
+        if self._hooks_active:
+            self.model.reset_hooks(clear_contexts=True, including_permanent=False)
+            self._hooks_active = False
     
     def generate_with_steering(
         self,
@@ -183,7 +183,7 @@ class FeatureSteerer:
             inputs = self.model.tokenizer(
                 prompt,
                 return_tensors="pt",
-            ).to(self.model.device)
+            ).to(self.model.cfg.device)
             
             # Generate
             with torch.no_grad():
@@ -193,7 +193,7 @@ class FeatureSteerer:
                     temperature=temperature,
                     top_p=top_p,
                     do_sample=do_sample,
-                    pad_token_id=self.model.tokenizer.eos_token_id,
+                    verbose=False,
                     **generate_kwargs,
                 )
             
@@ -222,7 +222,7 @@ class FeatureSteerer:
         inputs = self.model.tokenizer(
             prompt,
             return_tensors="pt",
-        ).to(self.model.device)
+        ).to(self.model.cfg.device)
         
         with torch.no_grad():
             outputs = self.model.generate(
@@ -231,7 +231,7 @@ class FeatureSteerer:
                 temperature=temperature,
                 top_p=top_p,
                 do_sample=do_sample,
-                pad_token_id=self.model.tokenizer.eos_token_id,
+                verbose=False,
                 **generate_kwargs,
             )
         
@@ -315,13 +315,13 @@ class MultiLayerSteerer:
             inputs = self.model.tokenizer(
                 prompt,
                 return_tensors="pt",
-            ).to(self.model.device)
+            ).to(self.model.cfg.device)
             
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs["input_ids"],
                     max_new_tokens=max_new_tokens,
-                    pad_token_id=self.model.tokenizer.eos_token_id,
+                    verbose=False,
                     **generate_kwargs,
                 )
             
