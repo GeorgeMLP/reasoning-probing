@@ -16,6 +16,7 @@ Usage:
 import argparse
 import json
 from pathlib import Path
+from typing import Optional
 import warnings
 import numpy as np
 import matplotlib.pyplot as plt
@@ -675,6 +676,379 @@ def plot_steering_results(data: dict, output_dir: Path):
 
 
 # =============================================================================
+# ANOVA Plots
+# =============================================================================
+
+def load_anova_data(experiment_dir: Path) -> Optional[dict]:
+    """Load ANOVA results from experiment directory."""
+    # Check for ANOVA results in layer directories
+    anova_data = {}
+    
+    for layer_dir in experiment_dir.iterdir():
+        if not layer_dir.is_dir() or not layer_dir.name.startswith('layer'):
+            continue
+        
+        layer_idx = int(layer_dir.name.replace('layer', ''))
+        
+        # Check for anova subdirectory
+        anova_dir = layer_dir / 'anova'
+        if anova_dir.exists():
+            results_path = anova_dir / 'anova_results.json'
+            if results_path.exists():
+                with open(results_path) as f:
+                    anova_data[layer_idx] = json.load(f)
+    
+    # Also check for top-level anova directory
+    for subdir in experiment_dir.iterdir():
+        if subdir.is_dir() and subdir.name == 'anova':
+            for layer_dir in subdir.iterdir():
+                if layer_dir.is_dir() and layer_dir.name.startswith('layer'):
+                    layer_idx = int(layer_dir.name.replace('layer', ''))
+                    results_path = layer_dir / 'anova_results.json'
+                    if results_path.exists():
+                        with open(results_path) as f:
+                            anova_data[layer_idx] = json.load(f)
+    
+    return anova_data if anova_data else None
+
+
+def plot_anova_summary(anova_data: dict, output_dir: Path):
+    """Plot ANOVA summary statistics across layers."""
+    anova_dir = output_dir / 'anova'
+    anova_dir.mkdir(parents=True, exist_ok=True)
+    
+    layers = sorted(anova_data.keys())
+    
+    # Extract summary statistics
+    metrics = {
+        'pct_token_dominated': [],
+        'pct_behavior_dominated': [],
+        'mean_eta_sq_token': [],
+        'mean_eta_sq_behavior': [],
+        'mean_eta_sq_interaction': [],
+    }
+    
+    for layer in layers:
+        summary = anova_data[layer].get('summary', {})
+        for key in metrics:
+            metrics[key].append(summary.get(key, 0))
+    
+    # Plot 1: Token vs Behavior Dominated Percentages
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    x = np.arange(len(layers))
+    width = 0.35
+    
+    bars1 = ax.bar(x - width/2, metrics['pct_token_dominated'], width, 
+                   label='Token-Dominated', color='#C44E52', alpha=0.8)
+    bars2 = ax.bar(x + width/2, metrics['pct_behavior_dominated'], width,
+                   label='Behavior-Dominated', color='#55A868', alpha=0.8)
+    
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'Layer {l}' for l in layers])
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Percentage of Features (%)')
+    ax.set_title('Token vs. Behavior Dominated Features by Layer')
+    ax.legend()
+    ax.set_ylim(0, 100)
+    
+    for bar in bars1:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 1,
+                f'{height:.1f}%', ha='center', va='bottom', fontsize=8)
+    for bar in bars2:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 1,
+                f'{height:.1f}%', ha='center', va='bottom', fontsize=8)
+    
+    plt.tight_layout()
+    plt.savefig(anova_dir / 'token_vs_behavior_dominated.png', bbox_inches='tight')
+    plt.close()
+    
+    # Plot 2: Mean Eta-Squared by Layer
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    width = 0.25
+    
+    bars1 = ax.bar(x - width, metrics['mean_eta_sq_token'], width,
+                   label='η² Token', color='#C44E52', alpha=0.8)
+    bars2 = ax.bar(x, metrics['mean_eta_sq_behavior'], width,
+                   label='η² Behavior', color='#55A868', alpha=0.8)
+    bars3 = ax.bar(x + width, metrics['mean_eta_sq_interaction'], width,
+                   label='η² Interaction', color='#4C72B0', alpha=0.8)
+    
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'Layer {l}' for l in layers])
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Mean η² (Variance Explained)')
+    ax.set_title('Mean Eta-Squared by Factor and Layer')
+    ax.legend()
+    
+    plt.tight_layout()
+    plt.savefig(anova_dir / 'mean_eta_squared_by_layer.png', bbox_inches='tight')
+    plt.close()
+
+
+def plot_anova_distributions(anova_data: dict, output_dir: Path):
+    """Plot distributions of ANOVA statistics."""
+    dist_dir = output_dir / 'anova' / 'distributions'
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    
+    layers = sorted(anova_data.keys())
+    
+    # Collect all eta-squared values
+    all_eta_token = []
+    all_eta_behavior = []
+    all_dominant = []
+    
+    for layer in layers:
+        features = anova_data[layer].get('features', [])
+        for f in features:
+            all_eta_token.append(f.get('eta_sq_token', 0))
+            all_eta_behavior.append(f.get('eta_sq_behavior', 0))
+            all_dominant.append(f.get('dominant_factor', 'none'))
+    
+    if not all_eta_token:
+        return
+    
+    # Plot 1: Scatter plot of η²_token vs η²_behavior
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    colors = {'token': '#C44E52', 'behavior': '#55A868', 
+              'interaction': '#4C72B0', 'mixed': '#DD8452', 'none': 'gray'}
+    
+    for dom_type in ['token', 'behavior', 'interaction', 'mixed', 'none']:
+        mask = [d == dom_type for d in all_dominant]
+        x_vals = [all_eta_token[i] for i in range(len(mask)) if mask[i]]
+        y_vals = [all_eta_behavior[i] for i in range(len(mask)) if mask[i]]
+        if x_vals:
+            ax.scatter(x_vals, y_vals, c=colors.get(dom_type, 'gray'),
+                      label=f'{dom_type.capitalize()} ({len(x_vals)})', alpha=0.6, s=50)
+    
+    # Add diagonal line
+    max_val = max(max(all_eta_token), max(all_eta_behavior))
+    ax.plot([0, max_val], [0, max_val], 'k--', alpha=0.3, label='Equal effect')
+    
+    ax.set_xlabel('η² Token')
+    ax.set_ylabel('η² Behavior')
+    ax.set_title('Token vs. Behavior Effect Sizes')
+    ax.legend()
+    
+    plt.tight_layout()
+    plt.savefig(dist_dir / 'eta_sq_scatter.png', bbox_inches='tight')
+    plt.close()
+    
+    # Plot 2: Histograms of η² values
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    
+    axes[0].hist(all_eta_token, bins=30, color='#C44E52', alpha=0.7, edgecolor='white')
+    axes[0].axvline(np.mean(all_eta_token), color='red', linestyle='--',
+                    label=f'Mean: {np.mean(all_eta_token):.4f}')
+    axes[0].set_xlabel('η² Token')
+    axes[0].set_ylabel('Count')
+    axes[0].set_title('Distribution of Token Effect Sizes')
+    axes[0].legend()
+    
+    axes[1].hist(all_eta_behavior, bins=30, color='#55A868', alpha=0.7, edgecolor='white')
+    axes[1].axvline(np.mean(all_eta_behavior), color='green', linestyle='--',
+                    label=f'Mean: {np.mean(all_eta_behavior):.4f}')
+    axes[1].set_xlabel('η² Behavior')
+    axes[1].set_ylabel('Count')
+    axes[1].set_title('Distribution of Behavior Effect Sizes')
+    axes[1].legend()
+    
+    plt.tight_layout()
+    plt.savefig(dist_dir / 'eta_sq_histograms.png', bbox_inches='tight')
+    plt.close()
+    
+    # Plot 3: Dominant factor distribution
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    dom_counts = {}
+    for d in all_dominant:
+        dom_counts[d] = dom_counts.get(d, 0) + 1
+    
+    categories = list(dom_counts.keys())
+    counts = list(dom_counts.values())
+    bar_colors = [colors.get(c, 'gray') for c in categories]
+    
+    bars = ax.bar(categories, counts, color=bar_colors, alpha=0.8)
+    ax.set_xlabel('Dominant Factor')
+    ax.set_ylabel('Number of Features')
+    ax.set_title('Distribution of Dominant Factors')
+    
+    for bar, count in zip(bars, counts):
+        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5,
+                str(count), ha='center', va='bottom')
+    
+    plt.tight_layout()
+    plt.savefig(dist_dir / 'dominant_factor_distribution.png', bbox_inches='tight')
+    plt.close()
+
+
+def plot_anova_by_layer(anova_data: dict, output_dir: Path):
+    """Plot ANOVA results separately for each layer."""
+    layer_dir = output_dir / 'anova' / 'by_layer'
+    layer_dir.mkdir(parents=True, exist_ok=True)
+    
+    for layer, data in sorted(anova_data.items()):
+        features = data.get('features', [])
+        if not features:
+            continue
+        
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        
+        # Extract data
+        eta_token = [f.get('eta_sq_token', 0) for f in features]
+        eta_behavior = [f.get('eta_sq_behavior', 0) for f in features]
+        f_token = [f.get('f_token', 0) for f in features]
+        f_behavior = [f.get('f_behavior', 0) for f in features]
+        
+        # Scatter: η² token vs behavior
+        ax = axes[0, 0]
+        ax.scatter(eta_token, eta_behavior, alpha=0.6, s=50, c='steelblue')
+        max_val = max(max(eta_token), max(eta_behavior)) if eta_token else 1
+        ax.plot([0, max_val], [0, max_val], 'k--', alpha=0.3)
+        ax.set_xlabel('η² Token')
+        ax.set_ylabel('η² Behavior')
+        ax.set_title('Effect Sizes: Token vs Behavior')
+        
+        # Histogram: η² difference
+        ax = axes[0, 1]
+        diff = [t - b for t, b in zip(eta_token, eta_behavior)]
+        ax.hist(diff, bins=25, color='coral', alpha=0.7, edgecolor='white')
+        ax.axvline(0, color='black', linestyle='--', alpha=0.5)
+        ax.axvline(np.mean(diff), color='red', linestyle='--',
+                   label=f'Mean: {np.mean(diff):.4f}')
+        ax.set_xlabel('η² Token - η² Behavior')
+        ax.set_ylabel('Count')
+        ax.set_title('Difference in Effect Sizes')
+        ax.legend()
+        
+        # Bar: Cell means
+        ax = axes[1, 0]
+        mean_A = np.mean([f.get('mean_A', 0) for f in features])
+        mean_B = np.mean([f.get('mean_B', 0) for f in features])
+        mean_C = np.mean([f.get('mean_C', 0) for f in features])
+        mean_D = np.mean([f.get('mean_D', 0) for f in features])
+        
+        cells = ['A\n(R+T)', 'B\n(R-T)', 'C\n(NR+T)', 'D\n(NR-T)']
+        means = [mean_A, mean_B, mean_C, mean_D]
+        colors_cells = ['#C44E52', '#55A868', '#DD8452', '#4C72B0']
+        
+        ax.bar(cells, means, color=colors_cells, alpha=0.8)
+        ax.set_xlabel('Condition')
+        ax.set_ylabel('Mean Activation')
+        ax.set_title('Average Cell Means Across Features')
+        
+        # Dominant factor pie
+        ax = axes[1, 1]
+        dom_counts = {}
+        for f in features:
+            d = f.get('dominant_factor', 'none')
+            dom_counts[d] = dom_counts.get(d, 0) + 1
+        
+        colors_pie = {'token': '#C44E52', 'behavior': '#55A868',
+                      'interaction': '#4C72B0', 'mixed': '#DD8452', 'none': 'gray'}
+        
+        labels = list(dom_counts.keys())
+        sizes = list(dom_counts.values())
+        pie_colors = [colors_pie.get(l, 'gray') for l in labels]
+        
+        ax.pie(sizes, labels=labels, colors=pie_colors, autopct='%1.1f%%',
+               startangle=90, alpha=0.8)
+        ax.set_title('Dominant Factor Distribution')
+        
+        plt.suptitle(f'Layer {layer} ANOVA Analysis', fontsize=14)
+        plt.tight_layout()
+        plt.savefig(layer_dir / f'layer{layer}_anova.png', bbox_inches='tight')
+        plt.close()
+
+
+def plot_anova_cell_means(anova_data: dict, output_dir: Path):
+    """Plot cell means pattern across layers."""
+    anova_dir = output_dir / 'anova'
+    anova_dir.mkdir(parents=True, exist_ok=True)
+    
+    layers = sorted(anova_data.keys())
+    
+    # Collect mean cell values across features for each layer
+    means = {'A': [], 'B': [], 'C': [], 'D': []}
+    
+    for layer in layers:
+        features = anova_data[layer].get('features', [])
+        if features:
+            means['A'].append(np.mean([f.get('mean_A', 0) for f in features]))
+            means['B'].append(np.mean([f.get('mean_B', 0) for f in features]))
+            means['C'].append(np.mean([f.get('mean_C', 0) for f in features]))
+            means['D'].append(np.mean([f.get('mean_D', 0) for f in features]))
+        else:
+            for key in means:
+                means[key].append(0)
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    x = np.arange(len(layers))
+    width = 0.2
+    
+    colors = {'A': '#C44E52', 'B': '#55A868', 'C': '#DD8452', 'D': '#4C72B0'}
+    labels = {
+        'A': 'Reasoning + Tokens',
+        'B': 'Reasoning - Tokens',
+        'C': 'Non-Reasoning + Tokens',
+        'D': 'Non-Reasoning - Tokens'
+    }
+    
+    for i, (cell, values) in enumerate(means.items()):
+        offset = (i - 1.5) * width
+        ax.bar(x + offset, values, width, label=labels[cell], 
+               color=colors[cell], alpha=0.8)
+    
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'Layer {l}' for l in layers])
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Mean Activation')
+    ax.set_title('Average Cell Means by Layer and Condition')
+    ax.legend(loc='best', fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig(anova_dir / 'cell_means_by_layer.png', bbox_inches='tight')
+    plt.close()
+
+
+def plot_all_anova(data: dict, output_dir: Path):
+    """Generate all ANOVA-related plots."""
+    # Try to load ANOVA data
+    anova_data = None
+    
+    # Check various possible locations
+    for layer in data.get('layers', []):
+        possible_paths = [
+            output_dir.parent / 'results' / output_dir.name / f'layer{layer}' / 'anova' / 'anova_results.json',
+        ]
+        for path in possible_paths:
+            if path.exists():
+                if anova_data is None:
+                    anova_data = {}
+                with open(path) as f:
+                    anova_data[layer] = json.load(f)
+    
+    if anova_data is None:
+        # Try loading from the data dict if available
+        anova_data = data.get('anova', None)
+    
+    if anova_data is None:
+        print("  No ANOVA data found, skipping ANOVA plots")
+        return
+    
+    print("  Generating ANOVA plots...")
+    plot_anova_summary(anova_data, output_dir)
+    plot_anova_distributions(anova_data, output_dir)
+    plot_anova_by_layer(anova_data, output_dir)
+    plot_anova_cell_means(anova_data, output_dir)
+
+
+# =============================================================================
 # Summary Plot
 # =============================================================================
 
@@ -768,6 +1142,7 @@ def process_experiment(experiment_dir: Path, plots_dir: Path,
                       plot_token: bool = True,
                       plot_scatter: bool = True,
                       plot_steering: bool = True,
+                      plot_anova_: bool = True,
                       plot_summary_: bool = True):
     """Process a single experiment and generate all plots."""
     print(f"\nProcessing: {experiment_dir}")
@@ -813,6 +1188,16 @@ def process_experiment(experiment_dir: Path, plots_dir: Path,
     if plot_steering:
         print("  Generating steering result plots...")
         plot_steering_results(data, output_dir)
+    
+    if plot_anova_:
+        # Try to load and plot ANOVA data
+        anova_data = load_anova_data(experiment_dir)
+        if anova_data:
+            print("  Generating ANOVA plots...")
+            plot_anova_summary(anova_data, output_dir)
+            plot_anova_distributions(anova_data, output_dir)
+            plot_anova_by_layer(anova_data, output_dir)
+            plot_anova_cell_means(anova_data, output_dir)
     
     if plot_summary_:
         print("  Generating summary plot...")
@@ -891,6 +1276,11 @@ def parse_args():
         help='Only generate steering result plots',
     )
     parser.add_argument(
+        '--only-anova',
+        action='store_true',
+        help='Only generate ANOVA plots',
+    )
+    parser.add_argument(
         '--only-summary',
         action='store_true',
         help='Only generate summary plot',
@@ -923,6 +1313,11 @@ def parse_args():
         help='Skip steering result plots',
     )
     parser.add_argument(
+        '--no-anova',
+        action='store_true',
+        help='Skip ANOVA plots',
+    )
+    parser.add_argument(
         '--no-summary',
         action='store_true',
         help='Skip summary plot',
@@ -940,7 +1335,7 @@ def main():
     
     # Determine which plots to generate
     only_flags = [args.only_layer_stats, args.only_distributions, args.only_token,
-                  args.only_scatter, args.only_steering, args.only_summary]
+                  args.only_scatter, args.only_steering, args.only_anova, args.only_summary]
     
     if any(only_flags):
         # Only specified categories
@@ -949,6 +1344,7 @@ def main():
         plot_token = args.only_token
         plot_scatter = args.only_scatter
         plot_steering = args.only_steering
+        plot_anova = args.only_anova
         plot_summary = args.only_summary
     else:
         # All categories except excluded
@@ -957,6 +1353,7 @@ def main():
         plot_token = not args.no_token
         plot_scatter = not args.no_scatter
         plot_steering = not args.no_steering
+        plot_anova = not args.no_anova
         plot_summary = not args.no_summary
     
     print(f"\nPlot categories enabled:")
@@ -965,6 +1362,7 @@ def main():
     print(f"  Token dependency: {plot_token}")
     print(f"  Scatter plots: {plot_scatter}")
     print(f"  Steering results: {plot_steering}")
+    print(f"  ANOVA: {plot_anova}")
     print(f"  Summary: {plot_summary}")
     
     # Find experiments
@@ -995,6 +1393,7 @@ def main():
             plot_token=plot_token,
             plot_scatter=plot_scatter,
             plot_steering=plot_steering,
+            plot_anova_=plot_anova,
             plot_summary_=plot_summary,
         )
     

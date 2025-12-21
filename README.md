@@ -189,29 +189,67 @@ Because exact string matching would fail for equivalent expressions, we use an L
 |---------|--------|---------|
 | **Pile** | `monology/pile-uncopyrighted` | General web text |
 
-## Future Work: ANOVA Analysis
+## Experiment 3: ANOVA Analysis
 
-The next step is to disentangle **token-level cues** from **reasoning behavior** using ANOVA.
+Disentangle **token-level cues** from **reasoning behavior** using a 2×2 factorial ANOVA design.
 
 ### 2×2 Factorial Design
 
-| | Has Reasoning Tokens | No Reasoning Tokens |
-|---|---------------------|---------------------|
-| **Is Reasoning** | Quadrant A | Quadrant B |
-| **Not Reasoning** | Quadrant C | Quadrant D |
+For each feature, we use its **top tokens** to create four conditions:
 
-### Analysis Plan
+| | Has Feature's Top Tokens | No Feature's Top Tokens |
+|---|--------------------------|-------------------------|
+| **Reasoning Text** | Quadrant A | Quadrant B |
+| **Non-Reasoning Text** | Quadrant C | Quadrant D |
 
-For each feature, fit a linear model:
+### Key Metrics
+
+| Metric | Description | Interpretation |
+|--------|-------------|----------------|
+| **η²_token** | Variance explained by token presence | High = token-dependent |
+| **η²_behavior** | Variance explained by reasoning vs. not | High = behavior-sensitive |
+| **Dominant Factor** | Which factor explains more variance | token/behavior/interaction/mixed |
+
+### Decision Rules
+
+- **Token-dominated**: η²_token > 2 × η²_behavior AND η²_token > 0.06
+- **Behavior-dominated**: η²_behavior > 2 × η²_token AND η²_behavior > 0.06
+
+### Usage
+
+```bash
+# Run ANOVA for layer 8 features
+python reasoning_features/scripts/run_anova_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --top-k-features 50 \
+    --n-per-condition 200 \
+    --save-dir results/anova/layer8
+
+# Quick test
+python reasoning_features/scripts/run_anova_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --top-k-features 10 \
+    --n-per-condition 50 \
+    --save-dir results/anova_test
 ```
-activation ~ token_factor + behavior_factor + interaction
+
+### Output
+
+```
+results/anova/layer8/
+├── anova_results.json      # Full ANOVA statistics per feature
+└── condition_summaries.json # Token distribution by condition
 ```
 
-**Expected findings:**
-- Token factor explains most variance → Feature relies on shallow cues
-- Behavior factor explains significant variance → Feature may capture reasoning
+### Interpretation
 
-This framework is designed to support this analysis—the `FeatureActivations` class stores all necessary metadata.
+| Result | Interpretation |
+|--------|----------------|
+| Most features token-dominated | Reasoning features are spurious (token correlations) |
+| Most features behavior-dominated | Features capture genuine reasoning (surprising!) |
+| Mixed results | Some features genuine, some spurious |
 
 ## Installation
 
