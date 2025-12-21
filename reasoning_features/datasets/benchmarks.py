@@ -78,7 +78,7 @@ class AIME24Benchmark(BaseBenchmark):
             f"Solve the following math problem. "
             f"Provide your final answer in \\boxed{{}} format.\n\n"
             f"Problem: {question}\n\n"
-            f"Solution:"
+            f"Solution (a number in \\boxed{{}} format only; no other text):"
         )
 
 
@@ -140,7 +140,7 @@ class GPQADiamondBenchmark(BaseBenchmark):
             f"Answer the following multiple choice question. "
             f"Provide only the letter (A, B, C, or D) as your final answer.\n\n"
             f"Question: {question}\n\n"
-            f"Answer:"
+            f"Answer (a single letter A/B/C/D only; no other text):"
         )
 
 

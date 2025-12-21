@@ -127,8 +127,8 @@ def parse_args():
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=512,
-        help="Maximum tokens to generate (default: 512)",
+        default=20,
+        help="Maximum tokens to generate (default: 20)",
     )
     parser.add_argument(
         "--temperature",

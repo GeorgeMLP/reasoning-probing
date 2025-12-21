@@ -4,6 +4,7 @@ from .base import BaseDataset, TextSample
 from .pile import PileDataset
 from .reasoning import S1KDataset, GeneralInquiryCoTDataset, get_reasoning_dataset
 from .benchmarks import AIME24Benchmark, GPQADiamondBenchmark, get_benchmark
+from .anova import ANOVADatasetBuilder, ANOVACondition, compute_anova_for_feature
 
 
 __all__ = [
@@ -16,4 +17,7 @@ __all__ = [
     "AIME24Benchmark",
     "GPQADiamondBenchmark",
     "get_benchmark",
+    "ANOVADatasetBuilder",
+    "ANOVACondition",
+    "compute_anova_for_feature",
 ]
