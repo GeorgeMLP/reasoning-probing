@@ -24,17 +24,31 @@ If η²_behavior >> η²_token: Feature captures genuine reasoning
 ## Usage
 
 ```bash
-# Run ANOVA for features detected in layer 8
+# Run ANOVA for features detected in layer 8 using s1K dataset
 python run_anova_experiment.py \\
     --token-analysis results/layer8/token_analysis.json \\
     --layer 8 \\
     --save-dir results/anova/layer8
 
+# Run with General Inquiry CoT dataset
+python run_anova_experiment.py \\
+    --token-analysis results/layer8/token_analysis.json \\
+    --reasoning-dataset general_inquiry_cot \\
+    --layer 8 \\
+    --save-dir results/anova/layer8/general_inquiry_cot
+
+# Run with combined dataset (both s1K and General Inquiry CoT)
+python run_anova_experiment.py \\
+    --token-analysis results/layer8/token_analysis.json \\
+    --reasoning-dataset combined \\
+    --layer 8 \\
+    --save-dir results/anova/layer8/combined
+
 # Quick test with fewer samples
 python run_anova_experiment.py \\
     --token-analysis results/layer8/token_analysis.json \\
     --layer 8 \\
-    --n-samples 100 \\
+    --n-per-condition 50 \\
     --top-k-features 10
 ```
 """
@@ -120,6 +134,12 @@ def parse_args():
     
     # Dataset configuration
     parser.add_argument(
+        "--reasoning-dataset",
+        choices=["s1k", "general_inquiry_cot", "combined"],
+        default="s1k",
+        help="Reasoning dataset to use (default: s1k)",
+    )
+    parser.add_argument(
         "--n-reasoning-chains",
         type=int,
         default=500,
@@ -184,10 +204,7 @@ def collect_activations_for_texts(
     
     Returns dict mapping feature_index -> array of max activations per text.
     """
-    from sae_lens import SAE
-    
     n_texts = len(texts)
-    n_features = len(feature_indices)
     
     # Initialize storage
     activations = {feat_idx: [] for feat_idx in feature_indices}
@@ -322,6 +339,7 @@ def main():
     print("ANOVA EXPERIMENT: Token vs. Behavior Effects")
     print("=" * 60)
     print(f"Token analysis: {args.token_analysis}")
+    print(f"Reasoning dataset: {args.reasoning_dataset}")
     print(f"Layer: {args.layer}")
     print(f"Top-k features: {args.top_k_features}")
     print(f"Top-k tokens per feature: {args.top_k_tokens}")
@@ -346,19 +364,50 @@ def main():
     print("\n--- Loading and Splitting Datasets ---")
     from reasoning_features.datasets.anova import split_into_sentences
     from datasets import load_dataset
+    import re
     
-    # Load reasoning data
-    print("Loading reasoning data...")
-    reasoning_ds = load_dataset("simplescaling/s1K-1.1", split="train")
+    # Load reasoning data based on selected dataset
+    print(f"Loading reasoning data from {args.reasoning_dataset}...")
     reasoning_sentences = []
-    for row in reasoning_ds:
-        text = row.get("gemini_thinking_trajectory", "")
-        if text:
-            sentences = split_into_sentences(text, min_length=50, max_length=500)
-            reasoning_sentences.extend(sentences)
-        if len(reasoning_sentences) >= args.n_reasoning_chains * 10:
-            break
-    print(f"  Got {len(reasoning_sentences)} reasoning sentences")
+    
+    if args.reasoning_dataset in ["s1k", "combined"]:
+        # Load s1K-1.1 dataset
+        print("  Loading s1K-1.1...")
+        s1k_ds = load_dataset("simplescaling/s1K-1.1", split="train")
+        for row in s1k_ds:
+            # Try both Gemini and DeepSeek trajectories
+            for col in ["gemini_thinking_trajectory", "deepseek_thinking_trajectory"]:
+                text = row.get(col, "")
+                if text:
+                    sentences = split_into_sentences(text, min_length=50, max_length=500)
+                    reasoning_sentences.extend(sentences)
+            if args.reasoning_dataset == "s1k" and len(reasoning_sentences) >= args.n_reasoning_chains * 10:
+                break
+        print(f"    Got {len(reasoning_sentences)} sentences from s1K")
+    
+    if args.reasoning_dataset in ["general_inquiry_cot", "combined"]:
+        # Load General Inquiry CoT dataset
+        print("  Loading General Inquiry Thinking CoT...")
+        giq_ds = load_dataset("moremilk/General_Inquiry_Thinking-Chain-Of-Thought", split="train")
+        giq_count = 0
+        for row in giq_ds:
+            metadata = row.get("metadata", {})
+            reasoning_text = metadata.get("reasoning", "") if isinstance(metadata, dict) else ""
+            if reasoning_text:
+                # Extract content between <think> and </think> tags if present
+                think_match = re.search(r"<think>(.*?)</think>", reasoning_text, re.DOTALL)
+                if think_match:
+                    text = think_match.group(1).strip()
+                else:
+                    text = reasoning_text
+                sentences = split_into_sentences(text, min_length=50, max_length=500)
+                reasoning_sentences.extend(sentences)
+                giq_count += len(sentences)
+            if args.reasoning_dataset == "general_inquiry_cot" and len(reasoning_sentences) >= args.n_reasoning_chains * 10:
+                break
+        print(f"    Got {giq_count} sentences from General Inquiry CoT")
+    
+    print(f"  Total reasoning sentences: {len(reasoning_sentences)}")
     
     # Load non-reasoning data
     print("Loading non-reasoning data...")
@@ -461,6 +510,7 @@ def main():
         json.dump({
             "config": {
                 "token_analysis": str(args.token_analysis),
+                "reasoning_dataset": args.reasoning_dataset,
                 "layer": args.layer,
                 "top_k_features": args.top_k_features,
                 "top_k_tokens": args.top_k_tokens,

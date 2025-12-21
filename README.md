@@ -33,6 +33,7 @@ reasoning_features/
 └── scripts/            # Main experiment scripts
     ├── find_reasoning_features.py
     ├── run_steering_experiment.py
+    ├── run_anova_experiment.py
     └── plot_results.py
 ```
 
@@ -215,16 +216,39 @@ For each feature, we use its **top tokens** to create four conditions:
 - **Token-dominated**: η²_token > 2 × η²_behavior AND η²_token > 0.06
 - **Behavior-dominated**: η²_behavior > 2 × η²_token AND η²_behavior > 0.06
 
+### Supported Reasoning Datasets
+
+| Dataset | Flag | Description |
+|---------|------|-------------|
+| **s1K** | `--reasoning-dataset s1k` | Gemini/DeepSeek reasoning trajectories (default) |
+| **General Inquiry CoT** | `--reasoning-dataset general_inquiry_cot` | `<think>` reasoning chains |
+| **Combined** | `--reasoning-dataset combined` | Both datasets merged |
+
 ### Usage
 
 ```bash
-# Run ANOVA for layer 8 features
+# Run ANOVA for layer 8 features using s1K dataset
 python reasoning_features/scripts/run_anova_experiment.py \
     --token-analysis results/layer8/token_analysis.json \
     --layer 8 \
+    --reasoning-dataset s1k \
     --top-k-features 50 \
     --n-per-condition 200 \
     --save-dir results/anova/layer8
+
+# Run with General Inquiry CoT dataset
+python reasoning_features/scripts/run_anova_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --reasoning-dataset general_inquiry_cot \
+    --save-dir results/anova/layer8/general_inquiry_cot
+
+# Run with combined dataset
+python reasoning_features/scripts/run_anova_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --reasoning-dataset combined \
+    --save-dir results/anova/layer8/combined
 
 # Quick test
 python reasoning_features/scripts/run_anova_experiment.py \

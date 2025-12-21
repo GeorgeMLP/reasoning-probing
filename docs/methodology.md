@@ -337,6 +337,173 @@ This requires:
 - If $\eta^2_{\text{Behavior}} > \eta^2_{\text{Token}}$: Features capture genuine reasoning (surprising)
 - If both effects are large with significant interaction: Features respond to token-behavior combinations
 
+### 5.8 Implementation Details
+
+#### 5.8.1 Supported Datasets
+
+The ANOVA experiment supports three reasoning dataset configurations:
+
+| Dataset | Description | Source Column |
+|---------|-------------|---------------|
+| `s1k` | s1K-1.1 reasoning trajectories | `gemini_thinking_trajectory`, `deepseek_thinking_trajectory` |
+| `general_inquiry_cot` | General Inquiry Chain-of-Thought | `metadata.reasoning` (extracted from `<think>` tags) |
+| `combined` | Both datasets merged | All of the above |
+
+The non-reasoning baseline is always drawn from `monology/pile-uncopyrighted`.
+
+#### 5.8.2 Text Splitting Strategy
+
+Long reasoning chains are split into sentence-level chunks to increase sample size for the 2×2 design:
+
+1. **Paragraph splitting:** Text is first split by double newlines
+2. **Sentence splitting:** Paragraphs exceeding `max_length` are split at sentence boundaries (`.!?`)
+3. **Chunk aggregation:** Short sentences are merged until they reach `min_length`
+4. **Fallback:** If insufficient chunks, split by single newlines
+
+Parameters:
+- `min_length = 50` characters
+- `max_length = 500` characters
+
+This typically yields 10-50 chunks per reasoning chain, significantly expanding the sample pool.
+
+#### 5.8.3 Token-Based Classification
+
+For each feature, texts are classified based on presence of the feature's top-k tokens:
+
+```python
+def text_contains_tokens(text, tokens, threshold=1):
+    """Returns True if text contains at least `threshold` tokens."""
+    matches = sum(1 for t in tokens if t.lower() in text.lower())
+    return matches >= threshold
+```
+
+The top tokens are loaded from the token analysis results produced by `find_reasoning_features.py`.
+
+#### 5.8.4 Activation Collection
+
+For each text in each condition:
+1. Tokenize with model's tokenizer (padding, truncation to `max_length`)
+2. Run forward pass through the model
+3. Extract residual stream activations at the target layer
+4. Encode through SAE to get feature activations
+5. Take maximum activation across sequence positions
+
+#### 5.8.5 ANOVA Computation
+
+For balanced design with $n$ samples per cell:
+
+**Cell means:**
+- $\bar{a}_A$: Mean activation for Reasoning + Has Tokens
+- $\bar{a}_B$: Mean activation for Reasoning + No Tokens
+- $\bar{a}_C$: Mean activation for Non-reasoning + Has Tokens
+- $\bar{a}_D$: Mean activation for Non-reasoning + No Tokens
+
+**Marginal means:**
+- $\bar{a}_{\text{has\_tokens}} = (\bar{a}_A + \bar{a}_C) / 2$
+- $\bar{a}_{\text{no\_tokens}} = (\bar{a}_B + \bar{a}_D) / 2$
+- $\bar{a}_{\text{reasoning}} = (\bar{a}_A + \bar{a}_B) / 2$
+- $\bar{a}_{\text{nonreasoning}} = (\bar{a}_C + \bar{a}_D) / 2$
+
+**Sum of squares (balanced design):**
+
+$$SS_{\text{token}} = 2n \cdot [(\bar{a}_{\text{has\_tokens}} - \bar{a}_{\cdot\cdot})^2 + (\bar{a}_{\text{no\_tokens}} - \bar{a}_{\cdot\cdot})^2]$$
+
+$$SS_{\text{behavior}} = 2n \cdot [(\bar{a}_{\text{reasoning}} - \bar{a}_{\cdot\cdot})^2 + (\bar{a}_{\text{nonreasoning}} - \bar{a}_{\cdot\cdot})^2]$$
+
+**F-statistics and p-values:** Computed using the F-distribution with appropriate degrees of freedom.
+
+#### 5.8.6 Decision Criteria
+
+A feature is classified as:
+
+| Classification | Criteria |
+|---------------|----------|
+| **Token-dominated** | $\eta^2_{\text{token}} > 2 \cdot \eta^2_{\text{behavior}}$ AND $\eta^2_{\text{token}} > 0.06$ |
+| **Behavior-dominated** | $\eta^2_{\text{behavior}} > 2 \cdot \eta^2_{\text{token}}$ AND $\eta^2_{\text{behavior}} > 0.06$ |
+| **Interaction-dominated** | $\eta^2_{\text{interaction}} > \max(\eta^2_{\text{token}}, \eta^2_{\text{behavior}})$ AND $\eta^2_{\text{interaction}} > 0.06$ |
+| **Mixed** | No single factor dominates but effects are non-negligible |
+| **None** | All effects are below 0.01 (negligible) |
+
+The threshold of 0.06 corresponds to a "medium" effect size in the η² scale.
+
+#### 5.8.7 Usage Example
+
+```bash
+# Run ANOVA experiment for layer 8 features using s1K dataset
+python reasoning_features/scripts/run_anova_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --reasoning-dataset s1k \
+    --top-k-features 50 \
+    --top-k-tokens 10 \
+    --n-per-condition 200 \
+    --save-dir results/anova/layer8
+
+# Run with General Inquiry CoT dataset
+python reasoning_features/scripts/run_anova_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --reasoning-dataset general_inquiry_cot \
+    --save-dir results/anova/layer8/general_inquiry_cot
+
+# Run with combined dataset
+python reasoning_features/scripts/run_anova_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --reasoning-dataset combined \
+    --save-dir results/anova/layer8/combined
+```
+
+#### 5.8.8 Output Format
+
+The experiment produces `anova_results.json` with the following structure:
+
+```json
+{
+  "config": {
+    "token_analysis": "path/to/token_analysis.json",
+    "reasoning_dataset": "s1k",
+    "layer": 8,
+    "top_k_features": 50,
+    "top_k_tokens": 10,
+    "n_per_condition": 200
+  },
+  "summary": {
+    "n_features_analyzed": 45,
+    "n_token_dominated": 32,
+    "n_behavior_dominated": 5,
+    "pct_token_dominated": 71.1,
+    "pct_behavior_dominated": 11.1,
+    "mean_eta_sq_token": 0.142,
+    "mean_eta_sq_behavior": 0.038,
+    "dominant_factor_distribution": {
+      "token": 32,
+      "behavior": 5,
+      "mixed": 6,
+      "none": 2
+    }
+  },
+  "features": [
+    {
+      "feature_index": 42,
+      "eta_sq_token": 0.23,
+      "eta_sq_behavior": 0.05,
+      "eta_sq_interaction": 0.02,
+      "f_token": 89.5,
+      "f_behavior": 18.3,
+      "p_token": 1e-15,
+      "p_behavior": 2e-5,
+      "mean_A": 3.21,
+      "mean_B": 1.45,
+      "mean_C": 2.89,
+      "mean_D": 0.98,
+      "is_token_dominated": true,
+      "dominant_factor": "token"
+    }
+  ]
+}
+```
+
 ---
 
 ## 6. Empirical Validation
