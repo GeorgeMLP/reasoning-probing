@@ -71,7 +71,7 @@ def load_experiment_data(experiment_dir: Path) -> dict:
                 data['feature_stats'][layer_idx] = json.load(f)
         
         # Load steering results
-        for benchmark in ['aime24', 'gpqa_diamond']:
+        for benchmark in ['aime24', 'gpqa_diamond', 'math500']:
             benchmark_dir = layer_dir / benchmark
             if benchmark_dir.exists():
                 summary_path = benchmark_dir / 'experiment_summary.json'
@@ -627,7 +627,7 @@ def plot_steering_results(data: dict, output_dir: Path):
         print("No steering results to plot")
         return
     
-    for benchmark in ['aime24', 'gpqa_diamond']:
+    for benchmark in ['aime24', 'gpqa_diamond', 'math500']:
         layers_with_data = []
         multipliers = set()
         results_by_layer = {}

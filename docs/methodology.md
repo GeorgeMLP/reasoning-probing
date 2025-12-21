@@ -22,7 +22,7 @@ This document provides mathematical definitions, intuitive justifications, and d
 
 We hypothesize that SAE features identified as "reasoning features" primarily capture **shallow token-level distributional patterns** rather than **genuine reasoning processes**. Specifically:
 
-1. Features that activate differentially on reasoning vs. non-reasoning text are driven by surface tokens (e.g., "Let", "Prove", "First", "therefore") rather than underlying reasoning operations.
+1. Features that activate differently on reasoning vs. non-reasoning text are driven by surface tokens (e.g., "Let", "Prove", "First", "therefore") rather than underlying reasoning operations.
 2. Steering (amplifying) these features will not improve—and may even decrease—performance on reasoning benchmarks.
 3. A 2×2 ANOVA analysis will show that the **token factor** explains significantly more variance than the **reasoning behavior factor**.
 

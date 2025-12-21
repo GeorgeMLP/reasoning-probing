@@ -15,6 +15,13 @@ If "reasoning features" are spurious (token correlations):
 - Amplifying them will likely decrease performance
 - The model may produce text that "looks like" reasoning but isn't correct
 
+## Benchmarks
+
+- **aime24**: AIME 2024 math competition problems (30 problems, numerical answers)
+- **gpqa_diamond**: Graduate-level science questions (198 problems, A/B/C/D)
+- **math500**: MATH-500 diverse math problems (500 problems, various answer formats)
+  - Note: math500 requires OPENROUTER_API_KEY for LLM-based answer checking
+
 ## Usage
 
 ```bash
@@ -29,6 +36,13 @@ python run_steering_experiment.py \\
     --benchmark gpqa_diamond \\
     --multipliers 0.5 1.0 2.0 4.0
 
+# Run MATH-500 (requires OPENROUTER_API_KEY)
+export OPENROUTER_API_KEY=your_key_here
+python run_steering_experiment.py \\
+    --features-file results/layer8/reasoning_features.json \\
+    --benchmark math500 \\
+    --max-samples 50
+
 # Quick test
 python run_steering_experiment.py \\
     --features-file results/layer8/reasoning_features.json \\
@@ -39,6 +53,7 @@ python run_steering_experiment.py \\
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -96,16 +111,16 @@ def parse_args():
     parser.add_argument(
         "--top-k-features",
         type=int,
-        default=20,
-        help="Number of top features to use from file (default: 20)",
+        default=512,
+        help="Number of top features to use from file (default: 512)",
     )
     
     # Benchmark configuration
     parser.add_argument(
         "--benchmark",
-        choices=["aime24", "gpqa_diamond"],
+        choices=["aime24", "gpqa_diamond", "math500"],
         required=True,
-        help="Benchmark to evaluate",
+        help="Benchmark to evaluate (math500 requires OPENROUTER_API_KEY)",
     )
     parser.add_argument(
         "--max-samples",
@@ -127,8 +142,8 @@ def parse_args():
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=20,
-        help="Maximum tokens to generate (default: 20)",
+        default=512,
+        help="Maximum tokens to generate (default: 512, allows for reasoning)",
     )
     parser.add_argument(
         "--temperature",
@@ -177,6 +192,15 @@ def load_features_from_file(file_path: Path, top_k: int) -> list[int]:
 def main():
     args = parse_args()
     
+    # Check for API key if using math500
+    if args.benchmark == "math500":
+        if not os.getenv("OPENROUTER_API_KEY"):
+            print("ERROR: OPENROUTER_API_KEY environment variable required for math500 benchmark.")
+            print("The math500 benchmark uses an LLM judge to evaluate mathematical expression equivalence.")
+            print("\nSet the API key with:")
+            print("  export OPENROUTER_API_KEY=your_key_here")
+            sys.exit(1)
+    
     print("=" * 60)
     print("STEERING EXPERIMENT")
     print("=" * 60)
@@ -185,6 +209,7 @@ def main():
     print(f"Layer: {args.layer}")
     print(f"Benchmark: {args.benchmark}")
     print(f"Multipliers: {args.multipliers}")
+    print(f"Max new tokens: {args.max_new_tokens}")
     print("=" * 60)
     
     # Load feature indices

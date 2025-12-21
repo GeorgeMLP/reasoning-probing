@@ -18,17 +18,22 @@ reasoning_features/
 ├── datasets/           # Dataset loaders
 │   ├── pile.py         # Non-reasoning text (Pile)
 │   ├── reasoning.py    # Reasoning datasets (s1K, General Inquiry CoT)
-│   └── benchmarks.py   # Evaluation benchmarks (AIME24, GPQA Diamond)
+│   ├── benchmarks.py   # Evaluation benchmarks (AIME24, GPQA Diamond, MATH-500)
+│   └── anova.py        # 2×2 ANOVA dataset construction
 ├── features/           # Feature analysis
 │   ├── collector.py    # SAE activation collection
 │   ├── detector.py     # Reasoning feature detection
-│   └── tokens.py       # Token dependency analysis
+│   ├── tokens.py       # Token dependency analysis
+│   └── selection.py    # Feature selection for steering
 ├── steering/           # Intervention experiments
 │   ├── steerer.py      # Activation steering
 │   └── evaluator.py    # Benchmark evaluation
+├── utils/              # Utility functions
+│   └── llm_judge.py    # LLM-based answer equivalence checking
 └── scripts/            # Main experiment scripts
     ├── find_reasoning_features.py
-    └── run_steering_experiment.py
+    ├── run_steering_experiment.py
+    └── plot_results.py
 ```
 
 ## Experiment 1: Finding Reasoning Features
@@ -95,10 +100,21 @@ Test whether amplifying "reasoning features" actually improves performance on re
 
 ### Supported Benchmarks
 
-| Benchmark | Task | Metric |
-|-----------|------|--------|
-| **AIME24** | Math competition problems | Exact match (boxed answer) |
-| **GPQA Diamond** | Graduate-level science MCQ | A/B/C/D accuracy |
+| Benchmark | Task | Metric | Notes |
+|-----------|------|--------|-------|
+| **AIME24** | Math competition problems (30) | Exact numerical match | `math-ai/aime24` |
+| **GPQA Diamond** | Graduate-level science MCQ (198) | A/B/C/D accuracy | `fingertap/GPQA-Diamond` |
+| **MATH-500** | Diverse math problems (500) | LLM-judged equivalence | Requires `OPENROUTER_API_KEY` |
+
+### Prompt Design
+
+The prompts are designed to allow the model to reason before providing its answer:
+
+1. **One-shot example**: Each prompt includes a worked example (not from the benchmark) demonstrating the expected format
+2. **Reasoning-friendly**: Models are asked to "show your reasoning step by step"
+3. **Boxed format**: Final answers should be in `\boxed{}` format for reliable extraction
+
+This design allows us to test whether steering "reasoning features" actually affects the model's reasoning process.
 
 ### Usage
 
@@ -116,12 +132,29 @@ python reasoning_features/scripts/run_steering_experiment.py \
     --benchmark gpqa_diamond \
     --multipliers 0.5 1.0 2.0
 
+# Run MATH-500 (requires OpenRouter API key)
+export OPENROUTER_API_KEY=your_key_here
+python reasoning_features/scripts/run_steering_experiment.py \
+    --features-file results/layer8/reasoning_features.json \
+    --benchmark math500 \
+    --max-samples 50 \
+    --save-dir results/steering_math500
+
 # Quick test (5 samples)
 python reasoning_features/scripts/run_steering_experiment.py \
     --features-file results/layer8/reasoning_features.json \
     --benchmark aime24 \
     --max-samples 5
 ```
+
+### MATH-500 Benchmark
+
+The MATH-500 benchmark (`HuggingFaceH4/MATH-500`) contains diverse math problems with answers in various formats:
+- Numerical: `-4`, `1.5`
+- Algebraic: `1 \pm \sqrt{19}`, `2k+2`
+- Text: `\text{east}`, `\text{Monday}`
+
+Because exact string matching would fail for equivalent expressions, we use an LLM judge (Gemini 2.0 Flash via OpenRouter) to evaluate mathematical equivalence. This requires setting the `OPENROUTER_API_KEY` environment variable.
 
 ### Steering Multipliers
 
