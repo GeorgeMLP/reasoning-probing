@@ -98,13 +98,13 @@ def parse_args():
     # Model configuration
     parser.add_argument(
         "--model-name",
-        default="google/gemma-2-2b",
-        help="HuggingFace model name (default: google/gemma-2-2b)",
+        default="google/gemma-2-9b",
+        help="HuggingFace model name (default: google/gemma-2-9b)",
     )
     parser.add_argument(
         "--sae-name",
-        default="gemma-scope-2b-pt-res-canonical",
-        help="SAE release name (default: gemma-scope-2b-pt-res-canonical)",
+        default="gemma-scope-9b-pt-res-canonical",
+        help="SAE release name (default: gemma-scope-9b-pt-res-canonical)",
     )
     parser.add_argument(
         "--sae-id-format",
@@ -277,7 +277,7 @@ def run_anova_for_feature(
         len(nonreasoning_no_tokens),
     )
     
-    if min_samples < 10:
+    if min_samples < 200:
         print(f"  Feature {feature_index}: Insufficient samples (min={min_samples})")
         return None
     
@@ -433,7 +433,7 @@ def main():
     )
     
     sae_id = args.sae_id_format.format(layer=args.layer)
-    sae, _, _ = SAE.from_pretrained(
+    sae = SAE.from_pretrained(
         release=args.sae_name,
         sae_id=sae_id,
         device=args.device,

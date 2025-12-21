@@ -11,14 +11,18 @@ from .base import BaseBenchmark, BenchmarkSample
 MATH_ONE_SHOT_EXAMPLE = """Example:
 Problem: If $x + y = 106$ and $x - y = 488$, what is the value of $x$?
 
-Solution: I need to solve this system of equations.
+Solution: Let me work through this step by step.
 
-Adding the two equations:
+I need to solve this system of equations. Adding the two equations:
 $(x + y) + (x - y) = 106 + 488$
+
+Simplifying the left-hand side:
 $2x = 594$
+
+Dividing both sides by 2:
 $x = 297$
 
-\\boxed{297}
+Therefore, the value of $x$ is $\\boxed{297}$.
 
 """
 
@@ -104,13 +108,17 @@ class AIME24Benchmark(BaseBenchmark):
     
     def format_prompt(self, question: str) -> str:
         """Format question into a prompt for the model."""
+        # Note: We start the solution with a specific phrase to encourage
+        # step-by-step reasoning. Without this, some base models may output
+        # placeholder answers like \boxed{?} immediately, especially with
+        # low temperature settings.
         return (
             f"Solve the following math problem. "
             f"Provide your final answer in \\boxed{{}} format.\n\n"
             f"{MATH_ONE_SHOT_EXAMPLE}"
             f"Now solve this problem:\n"
             f"Problem: {question}\n\n"
-            f"Solution:"
+            f"Solution: Let me work through this step by step.\n\n"
         )
 
 
@@ -306,13 +314,17 @@ class MATH500Benchmark(BaseBenchmark):
     
     def format_prompt(self, question: str) -> str:
         """Format question into a prompt for the model."""
+        # Note: We start the solution with a specific phrase to encourage
+        # step-by-step reasoning. Without this, some base models may output
+        # placeholder answers like \boxed{?} immediately, especially with
+        # low temperature settings.
         return (
             f"Solve the following math problem. "
             f"Provide your final answer in \\boxed{{}} format.\n\n"
             f"{MATH_ONE_SHOT_EXAMPLE}"
             f"Now solve this problem:\n"
             f"Problem: {question}\n\n"
-            f"Solution:"
+            f"Solution: Let me work through this step by step.\n\n"
         )
 
 

@@ -382,8 +382,8 @@ def compute_anova_for_feature(
         mean_C=float(mean_C),
         mean_D=float(mean_D),
         n_per_cell=n,
-        is_token_dominated=is_token_dominated,
-        is_behavior_dominated=is_behavior_dominated,
+        is_token_dominated=bool(is_token_dominated),
+        is_behavior_dominated=bool(is_behavior_dominated),
         dominant_factor=dominant_factor,
     )
 
