@@ -9,19 +9,16 @@ from .base import BaseBenchmark, BenchmarkSample
 
 # One-shot example for math problems (not from any benchmark)
 MATH_ONE_SHOT_EXAMPLE = """Example:
-Problem: If $x + y = 10$ and $x - y = 4$, what is the value of $x$?
+Problem: If $x + y = 106$ and $x - y = 488$, what is the value of $x$?
 
 Solution: I need to solve this system of equations.
 
 Adding the two equations:
-$(x + y) + (x - y) = 10 + 4$
-$2x = 14$
-$x = 7$
+$(x + y) + (x - y) = 106 + 488$
+$2x = 594$
+$x = 297$
 
-Let me verify: If $x = 7$, then $y = 10 - 7 = 3$.
-Check: $7 + 3 = 10$ ✓ and $7 - 3 = 4$ ✓
-
-\\boxed{7}
+\\boxed{297}
 
 """
 
@@ -33,7 +30,7 @@ B) Mars
 C) Jupiter
 D) Saturn
 
-Answer: Let me think about this. The largest planet in our solar system is Jupiter, which has a mass more than twice that of all other planets combined. Its diameter is about 11 times that of Earth.
+Answer: The largest planet in our solar system is Jupiter, which has a mass more than twice that of all other planets combined. Its diameter is about 11 times that of Earth.
 
 \\boxed{C}
 
@@ -108,8 +105,8 @@ class AIME24Benchmark(BaseBenchmark):
     def format_prompt(self, question: str) -> str:
         """Format question into a prompt for the model."""
         return (
-            f"Solve the following math problem. Show your reasoning step by step, "
-            f"then provide your final answer in \\boxed{{}} format.\n\n"
+            f"Solve the following math problem. "
+            f"Provide your final answer in \\boxed{{}} format.\n\n"
             f"{MATH_ONE_SHOT_EXAMPLE}"
             f"Now solve this problem:\n"
             f"Problem: {question}\n\n"
@@ -177,8 +174,8 @@ class GPQADiamondBenchmark(BaseBenchmark):
     def format_prompt(self, question: str) -> str:
         """Format question into a prompt for the model."""
         return (
-            f"Answer the following multiple choice question. Think through the problem "
-            f"step by step, then provide your final answer in \\boxed{{}} format with "
+            f"Answer the following multiple choice question. "
+            f"Provide your final answer in \\boxed{{}} format with "
             f"the letter (A, B, C, or D).\n\n"
             f"{MCQ_ONE_SHOT_EXAMPLE}"
             f"Now answer this question:\n"
@@ -310,8 +307,8 @@ class MATH500Benchmark(BaseBenchmark):
     def format_prompt(self, question: str) -> str:
         """Format question into a prompt for the model."""
         return (
-            f"Solve the following math problem. Show your reasoning step by step, "
-            f"then provide your final answer in \\boxed{{}} format.\n\n"
+            f"Solve the following math problem. "
+            f"Provide your final answer in \\boxed{{}} format.\n\n"
             f"{MATH_ONE_SHOT_EXAMPLE}"
             f"Now solve this problem:\n"
             f"Problem: {question}\n\n"

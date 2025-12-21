@@ -45,9 +45,9 @@ We use multiple complementary statistical metrics to identify features that show
 
 #### 2.2.1 ROC-AUC (Area Under the Receiver Operating Characteristic Curve)
 
-**Definition:** For feature $f$ with activation values $\{a_i^{(r)}\}_{i=1}^{n_r}$ on reasoning samples and $\{a_j^{(nr)}\}_{j=1}^{n_{nr}}$ on non-reasoning samples, the ROC-AUC measures the probability that a randomly chosen reasoning sample has higher activation than a randomly chosen non-reasoning sample:
+**Definition:** For feature $f$ with activation values $\{a_i^{\text{r}}\}_{i=1}^{n_\text{r}}$ on reasoning samples and $\{a_j^{\text{nr}}\}_{j=1}^{n_\text{nr}}$ on non-reasoning samples, the ROC-AUC measures the probability that a randomly chosen reasoning sample has higher activation than a randomly chosen non-reasoning sample:
 
-$$\text{AUC} = P(a^{(r)} > a^{(nr)}) = \frac{1}{n_r \cdot n_{nr}} \sum_{i=1}^{n_r} \sum_{j=1}^{n_{nr}} \mathbf{1}[a_i^{(r)} > a_j^{(nr)}]$$
+$$\mathrm{AUC} = \mathbb{P}(a^{\text{r}} > a^{\text{nr}}) = \frac{1}{n_\text{r} \cdot n_\text{nr}} \sum_{i=1}^{n_\text{r}} \sum_{j=1}^{n_\text{nr}} \mathbf{1}[a_i^{\text{r}} > a_j^{\text{nr}}].$$
 
 **Threshold:** AUC ≥ 0.6 (10% improvement over random chance)
 
@@ -57,11 +57,11 @@ $$\text{AUC} = P(a^{(r)} > a^{(nr)}) = \frac{1}{n_r \cdot n_{nr}} \sum_{i=1}^{n_
 
 **Definition:** Cohen's d measures the standardized difference between group means:
 
-$$d = \frac{\bar{a}^{(r)} - \bar{a}^{(nr)}}{s_{\text{pooled}}}$$
+$$d = \frac{\bar{a}^{\text{r}} - \bar{a}^{\text{nr}}}{s_{\text{pooled}}},$$
 
 where the pooled standard deviation is:
 
-$$s_{\text{pooled}} = \sqrt{\frac{(n_r - 1)s_r^2 + (n_{nr} - 1)s_{nr}^2}{n_r + n_{nr} - 2}}$$
+$$s_{\text{pooled}} = \sqrt{\frac{(n_\text{r} - 1)s_\text{r}^2 + (n_\text{nr} - 1)s_\text{nr}^2}{n_\text{r} + n_\text{nr} - 2}}.$$
 
 **Threshold:** |d| ≥ 0.3 (small-to-medium effect)
 
@@ -76,7 +76,7 @@ This allows comparison across features with different activation magnitudes and 
 
 **Definition:** The Mann-Whitney U statistic tests whether the distributions of activations differ:
 
-$$U = \sum_{i=1}^{n_r} \sum_{j=1}^{n_{nr}} S(a_i^{(r)}, a_j^{(nr)})$$
+$$U = \sum_{i=1}^{n_\text{r}} \sum_{j=1}^{n_\text{nr}} S(a_i^{\text{r}}, a_j^{\text{nr}}),$$
 
 where $S(x, y) = \mathbf{1}[x > y] + 0.5 \cdot \mathbf{1}[x = y]$.
 
@@ -88,7 +88,7 @@ where $S(x, y) = \mathbf{1}[x > y] + 0.5 \cdot \mathbf{1}[x = y]$.
 
 **Definition:** The ratio of activation frequencies between groups:
 
-$$\text{FreqRatio} = \frac{P(a^{(r)} > \tau) + \epsilon}{P(a^{(nr)} > \tau) + \epsilon}$$
+$$\mathrm{FreqRatio} = \frac{P(a^{\text{r}} > \tau) + \epsilon}{P(a^{\text{nr}} > \tau) + \epsilon},$$
 
 where $\tau = 0.01 \cdot \max(a)$ and $\epsilon = 0.01$ prevents division by zero.
 
@@ -98,18 +98,18 @@ where $\tau = 0.01 \cdot \max(a)$ and $\epsilon = 0.01$ prevents division by zer
 
 **Definition:** We combine the metrics into a single score:
 
-$$\text{ReasoningScore} = \text{sign}(\bar{a}^{(r)} - \bar{a}^{(nr)}) \cdot \left( 
-    w_1 \cdot \text{AUC}_{\text{contrib}} + 
-    w_2 \cdot \text{Effect}_{\text{contrib}} + 
-    w_3 \cdot \text{P}_{\text{contrib}} + 
-    w_4 \cdot \text{Freq}_{\text{contrib}}
-\right)$$
+$$\mathrm{ReasoningScore} = \operatorname{sign}(\bar{a}^{\text{r}} - \bar{a}^{\text{nr}}) \cdot \left( 
+    w_1 \cdot \mathrm{AUC}_{\text{contrib}} + 
+    w_2 \cdot \mathrm{Effect}_{\text{contrib}} + 
+    w_3 \cdot \mathrm{P}_{\text{contrib}} + 
+    w_4 \cdot \mathrm{Freq}_{\text{contrib}}
+\right),$$
 
 where:
-- $\text{AUC}_{\text{contrib}} = 2 \cdot |\text{AUC} - 0.5|$ (scaled to [0, 1])
-- $\text{Effect}_{\text{contrib}} = \min(|d|, 3) / 3$ (capped at d=3)
-- $\text{P}_{\text{contrib}} = \min(-\log_{10}(p), 50) / 50$ (log-scaled p-value)
-- $\text{Freq}_{\text{contrib}} = \min(\log_2(\text{FreqRatio} + 1) / 5, 1)$ (log-scaled ratio)
+- $\mathrm{AUC}_{\text{contrib}} = 2 \cdot |\mathrm{AUC} - 0.5|$ (scaled to [0, 1])
+- $\mathrm{Effect}_{\text{contrib}} = \min(|d|, 3) / 3$ (capped at d=3)
+- $\mathrm{P}_{\text{contrib}} = \min(-\log_{10}(p), 50) / 50$ (log-scaled p-value)
+- $\mathrm{Freq}_{\text{contrib}} = \min(\log_2(\mathrm{FreqRatio} + 1) / 5, 1)$ (log-scaled ratio)
 - Weights: $w_1 = 0.30$, $w_2 = 0.25$, $w_3 = 0.25$, $w_4 = 0.20$
 
 **Justification for Weights:**
@@ -138,7 +138,7 @@ Even if a feature shows strong differential activation on reasoning text, this d
 
 **Definition:** For token $t$ appearing at positions $\{(i, j)\}$ where $i$ indexes samples and $j$ indexes positions:
 
-$$\bar{a}_t = \frac{1}{|P_t|} \sum_{(i,j) \in P_t} a_{i,j}$$
+$$\bar{a}_t = \frac{1}{|P_t|} \sum_{(i,j) \in P_t} a_{i,j}.$$
 
 where $P_t$ is the set of all positions where token $t$ appears.
 
@@ -148,7 +148,7 @@ where $P_t$ is the set of all positions where token $t$ appears.
 
 **Definition:** PMI measures the co-occurrence strength between token $t$ and feature activation:
 
-$$\text{PMI}(t, f) = \log_2 \frac{P(a > \tau, t)}{P(a > \tau) \cdot P(t)}$$
+$$\mathrm{PMI}(t, f) = \log_2 \frac{P(a > \tau, t)}{P(a > \tau) \cdot P(t)}.$$
 
 where $\tau$ is the activation threshold.
 
@@ -158,7 +158,7 @@ where $\tau$ is the activation threshold.
 
 **Definition:** The fraction of high activations that come from the top-k tokens:
 
-$$\text{Concentration} = \frac{\sum_{t \in \text{Top}_k} \text{Count}(a > \tau \land t)}{\text{Count}(a > \tau)}$$
+$$\mathrm{Concentration} = \frac{\sum_{t \in \mathrm{Top}_k} \operatorname{Count}(a > \tau \land t)}{\operatorname{Count}(a > \tau)}.$$
 
 **Threshold:** Concentration > 0.5 indicates high token dependency
 
@@ -168,7 +168,7 @@ $$\text{Concentration} = \frac{\sum_{t \in \text{Top}_k} \text{Count}(a > \tau \
 
 **Definition:** The entropy of the token distribution weighted by activation:
 
-$$H_{\text{norm}} = \frac{-\sum_t p_t \log_2 p_t}{\log_2 |V|}$$
+$$H_{\text{norm}} = \frac{-\sum_t p_t \log_2 p_t}{\log_2 |V|},$$
 
 where $p_t = \frac{\sum_{(i,j): \text{token}_{i,j} = t} a_{i,j}}{\sum_{i,j} a_{i,j}}$ and $|V|$ is vocabulary size.
 
@@ -195,7 +195,7 @@ However, we report PMI and concentration as secondary metrics to provide a compl
 
 **Definition:** Modify feature activations by a scalar multiplier:
 
-$$\tilde{f}_i = m \cdot f_i$$
+$$\tilde{f}_i = m \cdot f_i,$$
 
 where $m > 1$ amplifies and $m < 1$ suppresses the feature.
 
@@ -203,7 +203,7 @@ where $m > 1$ amplifies and $m < 1$ suppresses the feature.
 
 **Definition:** Add a fixed value to feature activations:
 
-$$\tilde{f}_i = f_i + \delta$$
+$$\tilde{f}_i = f_i + \delta.$$
 
 ### 4.2 Multiplicative vs. Additive: Design Choice
 
@@ -262,8 +262,8 @@ We construct four conditions by crossing two factors:
 
 |   | **Has Reasoning Tokens** | **No Reasoning Tokens** |
 |---|--------------------------|-------------------------|
-| **Is Reasoning Chain** | Quadrant A | Quadrant B |
-| **Not Reasoning Chain** | Quadrant C | Quadrant D |
+| **Reasoning Chain** | Quadrant A | Quadrant B |
+| **General Text** | Quadrant C | Quadrant D |
 
 #### Quadrant Definitions:
 
@@ -284,7 +284,7 @@ We construct four conditions by crossing two factors:
 
 For each feature $f$, we fit a two-way ANOVA model:
 
-$$a_{ijk} = \mu + \alpha_i + \beta_j + (\alpha\beta)_{ij} + \epsilon_{ijk}$$
+$$a_{ijk} = \mu + \alpha_i + \beta_j + (\alpha\beta)_{ij} + \epsilon_{ijk},$$
 
 where:
 - $a_{ijk}$: Activation of feature $f$ for sample $k$ in condition $(i, j)$
@@ -298,29 +298,29 @@ where:
 
 The total sum of squares decomposes as:
 
-$$SS_{\text{Total}} = SS_{\text{Token}} + SS_{\text{Behavior}} + SS_{\text{Interaction}} + SS_{\text{Error}}$$
+$$\mathit{SS}_{\text{Total}} = \mathit{SS}_{\text{Token}} + \mathit{SS}_{\text{Behavior}} + \mathit{SS}_{\text{Interaction}} + \mathit{SS}_{\text{Error}},$$
 
 where:
 
-$$SS_{\text{Token}} = n_j n_k \sum_i (\bar{a}_{i\cdot\cdot} - \bar{a}_{\cdot\cdot\cdot})^2$$
+$$\mathit{SS}_{\text{Token}} = n_j n_k \sum_i (\bar{a}_{i\cdot\cdot} - \bar{a}_{\cdot\cdot\cdot})^2,$$
 
-$$SS_{\text{Behavior}} = n_i n_k \sum_j (\bar{a}_{\cdot j\cdot} - \bar{a}_{\cdot\cdot\cdot})^2$$
+$$\mathit{SS}_{\text{Behavior}} = n_i n_k \sum_j (\bar{a}_{\cdot j\cdot} - \bar{a}_{\cdot\cdot\cdot})^2,$$
 
-$$SS_{\text{Interaction}} = n_k \sum_{i,j} (\bar{a}_{ij\cdot} - \bar{a}_{i\cdot\cdot} - \bar{a}_{\cdot j\cdot} + \bar{a}_{\cdot\cdot\cdot})^2$$
+$$\mathit{SS}_{\text{Interaction}} = n_k \sum_{i,j} (\bar{a}_{ij\cdot} - \bar{a}_{i\cdot\cdot} - \bar{a}_{\cdot j\cdot} + \bar{a}_{\cdot\cdot\cdot})^2.$$
 
 ### 5.5 Variance Explained Metrics
 
 We compute the **eta-squared** (η²) effect sizes:
 
-$$\eta^2_{\text{Token}} = \frac{SS_{\text{Token}}}{SS_{\text{Total}}}$$
+$$\eta^2_{\text{Token}} = \frac{\mathit{SS}_{\text{Token}}}{\mathit{SS}_{\text{Total}}},$$
 
-$$\eta^2_{\text{Behavior}} = \frac{SS_{\text{Behavior}}}{SS_{\text{Total}}}$$
+$$\eta^2_{\text{Behavior}} = \frac{\mathit{SS}_{\text{Behavior}}}{\mathit{SS}_{\text{Total}}}.$$
 
 ### 5.6 Decision Rule
 
 A feature is **dominated by token patterns** if:
 
-$$\eta^2_{\text{Token}} > 2 \cdot \eta^2_{\text{Behavior}} \quad \text{AND} \quad \eta^2_{\text{Token}} > 0.1$$
+$$\eta^2_{\text{Token}} > 2 \cdot \eta^2_{\text{Behavior}} \quad \text{AND} \quad \eta^2_{\text{Token}} > 0.1.$$
 
 This requires:
 1. Token factor explains at least twice as much variance as behavior factor
@@ -399,13 +399,13 @@ Simply selecting features with the highest reasoning score for steering experime
 
 We propose a combined score that balances reasoning strength with token independence:
 
-$$\text{CombinedScore} = w_r \cdot \frac{\text{ReasoningScore}}{\max(\text{ReasoningScore})} + w_t \cdot \text{TokenIndependence}$$
+$$\mathrm{CombinedScore} = w_r \cdot \frac{\mathrm{ReasoningScore}}{\max(\mathrm{ReasoningScore})} + w_t \cdot \mathrm{TokenIndependence},$$
 
 where:
 
-$$\text{TokenIndependence} = (1 - \text{TokenConcentration}) \cdot (\text{NormalizedEntropy} + 0.1)$$
+$$\mathrm{TokenIndependence} = (1 - \mathrm{TokenConcentration}) \cdot (\mathrm{NormalizedEntropy} + 0.1).$$
 
-Default weights: $w_r = 0.6$, $w_t = 0.4$
+Default weights: $w_r = 0.6$, $w_t = 0.4$.
 
 ### 7.3 Implementation
 
