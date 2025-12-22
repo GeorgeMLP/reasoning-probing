@@ -45,17 +45,32 @@ import json
 import random
 from pathlib import Path
 import sys
+from typing import Optional
 
 import numpy as np
 import torch
+from jaxtyping import Float, Int
 from tqdm import tqdm
 from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
-def load_top_tokens_for_feature(token_analysis_path: str, feature_index: int, top_k: int = 30) -> list:
-    """Load top-k tokens for a specific feature."""
+def load_top_tokens_for_feature(
+    token_analysis_path: str,
+    feature_index: int,
+    top_k: int = 30,
+) -> list[str]:
+    """Load top-k tokens (as strings) for a specific feature.
+    
+    Args:
+        token_analysis_path: Path to token_analysis.json
+        feature_index: Index of the feature
+        top_k: Number of top tokens to return
+        
+    Returns:
+        List of token strings
+    """
     with open(token_analysis_path) as f:
         data = json.load(f)
     
@@ -67,8 +82,23 @@ def load_top_tokens_for_feature(token_analysis_path: str, feature_index: int, to
     return []
 
 
-def inject_tokens_into_text(text: str, tokens: list, n_inject: int = 3, strategy: str = "prepend") -> str:
-    """Inject tokens into text using various strategies."""
+def inject_tokens_into_text(
+    text: str,
+    tokens: list[str],
+    n_inject: int = 3,
+    strategy: str = "prepend",
+) -> str:
+    """Inject tokens into text using various strategies.
+    
+    Args:
+        text: The original text
+        tokens: List of tokens to inject
+        n_inject: Number of tokens to inject
+        strategy: One of "prepend", "append", "intersperse", "replace"
+        
+    Returns:
+        Modified text with tokens injected
+    """
     selected_tokens = random.sample(tokens, min(n_inject, len(tokens)))
     
     if strategy == "prepend":
@@ -107,10 +137,34 @@ def inject_tokens_into_text(text: str, tokens: list, n_inject: int = 3, strategy
     return text
 
 
-def get_feature_activation(model, sae, tokenizer, texts: list, layer: int, 
-                           feature_index: int, device: str, batch_size: int = 32) -> np.ndarray:
-    """Get feature activations for a batch of texts."""
-    activations = []
+def get_feature_activation(
+    model,
+    sae,
+    tokenizer,
+    texts: list[str],
+    layer: int,
+    feature_index: int,
+    device: str,
+    batch_size: int = 32,
+    max_length: int = 128,
+) -> Float[np.ndarray, "n_texts"]:
+    """Get max feature activations for a batch of texts.
+    
+    Args:
+        model: The transformer model
+        sae: The sparse autoencoder
+        tokenizer: The tokenizer
+        texts: List of text strings to process
+        layer: Layer index for activation extraction
+        feature_index: Index of the feature to extract
+        device: Device to run on
+        batch_size: Batch size for processing
+        max_length: Maximum sequence length
+        
+    Returns:
+        Array of shape (n_texts,) with max activation per text
+    """
+    activations: list[float] = []
     hook_name = f"blocks.{layer}.hook_resid_post"
     
     for i in range(0, len(texts), batch_size):
@@ -121,20 +175,20 @@ def get_feature_activation(model, sae, tokenizer, texts: list, layer: int,
             return_tensors="pt",
             padding=True,
             truncation=True,
-            max_length=128
+            max_length=max_length,
         )
-        input_ids = tokens["input_ids"].to(device)
-        attention_mask = tokens["attention_mask"].to(device)
+        input_ids: Int[torch.Tensor, "batch seq"] = tokens["input_ids"].to(device)
+        attention_mask: Int[torch.Tensor, "batch seq"] = tokens["attention_mask"].to(device)
         
         with torch.no_grad():
             _, cache = model.run_with_cache(input_ids, stop_at_layer=layer + 1)
-            hidden = cache[hook_name]
-            sae_out = sae.encode(hidden)
+            hidden: Float[torch.Tensor, "batch seq d_model"] = cache[hook_name]
+            sae_out: Float[torch.Tensor, "batch seq n_features"] = sae.encode(hidden)
             
             # Get max activation per text for the target feature
             for b in range(sae_out.shape[0]):
                 seq_len = int(attention_mask[b].sum().item())
-                acts = sae_out[b, :seq_len, feature_index].cpu().numpy()
+                acts: Float[np.ndarray, "seq"] = sae_out[b, :seq_len, feature_index].cpu().numpy()
                 activations.append(float(np.max(acts)))
         
         del cache, hidden, sae_out
@@ -148,15 +202,38 @@ def run_injection_experiment(
     sae,
     tokenizer,
     feature_index: int,
-    top_tokens: list,
-    nonreasoning_texts: list,
-    reasoning_texts: list,
+    top_tokens: list[str],
+    nonreasoning_texts: list[str],
+    reasoning_texts: list[str],
     layer: int,
     device: str,
     n_inject: int = 3,
-    strategies: list = ["prepend", "intersperse", "replace"],
+    strategies: Optional[list[str]] = None,
 ) -> dict:
-    """Run token injection experiment for a single feature."""
+    """Run token injection experiment for a single feature.
+    
+    This experiment tests whether a feature is token-driven by injecting
+    the feature's top tokens into non-reasoning text and measuring the
+    resulting activation increase.
+    
+    Args:
+        model: The transformer model
+        sae: The sparse autoencoder
+        tokenizer: The tokenizer
+        feature_index: Index of the feature to test
+        top_tokens: List of top token strings for this feature
+        nonreasoning_texts: Non-reasoning text samples (baseline)
+        reasoning_texts: Reasoning text samples (target)
+        layer: Layer index
+        device: Device to run on
+        n_inject: Number of tokens to inject per text
+        strategies: Injection strategies to test
+        
+    Returns:
+        Dictionary containing experiment results and classification
+    """
+    if strategies is None:
+        strategies = ["prepend", "intersperse", "replace"]
     
     results = {
         "feature_index": feature_index,
@@ -267,6 +344,9 @@ def main():
                         help="Number of tokens to inject per text")
     parser.add_argument("--n-samples", type=int, default=100,
                         help="Number of samples per condition")
+    parser.add_argument("--reasoning-dataset", type=str, default="s1k",
+                        choices=["s1k", "general_inquiry_cot", "combined"],
+                        help="Reasoning dataset to use")
     parser.add_argument("--model-name", type=str, default="google/gemma-2-9b")
     parser.add_argument("--sae-name", type=str, default="gemma-scope-9b-pt-res-canonical")
     parser.add_argument("--sae-id-format", type=str, default="layer_{layer}/width_16k/canonical")
@@ -303,24 +383,40 @@ def main():
     tokenizer = model.tokenizer
     
     # Load datasets
-    print("\nLoading datasets...")
+    print(f"\nLoading datasets (reasoning: {args.reasoning_dataset})...")
     from datasets import load_dataset
     
-    # Reasoning text
-    s1k = load_dataset("simplescaling/s1K-1.1", split="train")
-    reasoning_texts = []
-    for row in s1k:
-        for key in ["deepseek_thinking_trajectory", "gemini_thinking_trajectory"]:
-            if row.get(key):
-                reasoning_texts.append(row[key][:512])
-                if len(reasoning_texts) >= args.n_samples:
-                    break
-        if len(reasoning_texts) >= args.n_samples:
-            break
+    # Reasoning text based on dataset choice
+    reasoning_texts: list[str] = []
+    
+    if args.reasoning_dataset in ["s1k", "combined"]:
+        s1k = load_dataset("simplescaling/s1K-1.1", split="train")
+        for row in s1k:
+            for key in ["deepseek_thinking_trajectory", "gemini_thinking_trajectory"]:
+                if row.get(key):
+                    reasoning_texts.append(row[key][:512])
+                    if len(reasoning_texts) >= args.n_samples:
+                        break
+            if len(reasoning_texts) >= args.n_samples:
+                break
+    
+    if args.reasoning_dataset in ["general_inquiry_cot", "combined"]:
+        if len(reasoning_texts) < args.n_samples:
+            gicot = load_dataset("moremilk/General_Inquiry_Thinking-Chain-Of-Thought", split="train")
+            for row in gicot:
+                metadata = row.get("metadata", {})
+                if isinstance(metadata, dict):
+                    text = metadata.get("reasoning", "")
+                    if text:
+                        # Remove <think> tags
+                        text = text.replace("<think>", "").replace("</think>", "").strip()
+                        reasoning_texts.append(text[:512])
+                        if len(reasoning_texts) >= args.n_samples:
+                            break
     
     # Non-reasoning text
     pile = load_dataset("monology/pile-uncopyrighted", split="train", streaming=True)
-    nonreasoning_texts = []
+    nonreasoning_texts: list[str] = []
     for row in pile:
         text = row.get("text", "")
         if text and len(text) > 50:
@@ -388,6 +484,7 @@ def main():
     output = {
         "config": {
             "layer": args.layer,
+            "reasoning_dataset": args.reasoning_dataset,
             "top_k_features": args.top_k_features,
             "top_k_tokens": args.top_k_tokens,
             "n_inject": args.n_inject,

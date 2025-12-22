@@ -124,6 +124,13 @@ def parse_args():
     )
     
     # Dataset configuration
+    # Dataset configuration
+    parser.add_argument(
+        "--reasoning-dataset",
+        choices=["s1k", "general_inquiry_cot", "combined"],
+        default="s1k",
+        help="Reasoning dataset to use (default: s1k)",
+    )
     parser.add_argument(
         "--n-reasoning-texts",
         type=int,
@@ -458,6 +465,7 @@ def main():
     print("=" * 60)
     print(f"Token analysis: {args.token_analysis}")
     print(f"Layer: {args.layer}")
+    print(f"Reasoning dataset: {args.reasoning_dataset}")
     print(f"Token strategy: {args.token_strategy}")
     print(f"Top-k features: {args.top_k_features}")
     print(f"Top-k tokens per feature: {args.top_k_tokens}")
@@ -477,17 +485,35 @@ def main():
     from reasoning_features.datasets.anova import split_into_sentences
     from datasets import load_dataset
     
-    # Load reasoning texts
-    print("Loading reasoning data...")
-    reasoning_ds = load_dataset("simplescaling/s1K-1.1", split="train")
+    # Load reasoning texts based on dataset choice
+    print(f"Loading reasoning data from {args.reasoning_dataset}...")
     reasoning_texts = []
-    for row in reasoning_ds:
-        text = row.get("gemini_thinking_trajectory", "")
-        if text:
-            sentences = split_into_sentences(text, min_length=50, max_length=300)
-            reasoning_texts.extend(sentences)
-        if len(reasoning_texts) >= args.n_reasoning_texts:
-            break
+    
+    if args.reasoning_dataset in ["s1k", "combined"]:
+        reasoning_ds = load_dataset("simplescaling/s1K-1.1", split="train")
+        for row in reasoning_ds:
+            for key in ["gemini_thinking_trajectory", "deepseek_thinking_trajectory"]:
+                text = row.get(key, "")
+                if text:
+                    sentences = split_into_sentences(text, min_length=50, max_length=300)
+                    reasoning_texts.extend(sentences)
+            if len(reasoning_texts) >= args.n_reasoning_texts:
+                break
+    
+    if args.reasoning_dataset in ["general_inquiry_cot", "combined"]:
+        gicot_ds = load_dataset("moremilk/General_Inquiry_Thinking-Chain-Of-Thought", split="train")
+        for row in gicot_ds:
+            metadata = row.get("metadata", {})
+            if isinstance(metadata, dict):
+                text = metadata.get("reasoning", "")
+                # Remove <think> and </think> tags
+                if text:
+                    text = text.replace("<think>", "").replace("</think>", "").strip()
+                    sentences = split_into_sentences(text, min_length=50, max_length=300)
+                    reasoning_texts.extend(sentences)
+            if len(reasoning_texts) >= args.n_reasoning_texts:
+                break
+    
     reasoning_texts = reasoning_texts[:args.n_reasoning_texts]
     print(f"  Got {len(reasoning_texts)} reasoning texts")
     
@@ -646,6 +672,7 @@ def main():
             "config": {
                 "token_analysis": str(args.token_analysis),
                 "layer": args.layer,
+                "reasoning_dataset": args.reasoning_dataset,
                 "token_strategy": args.token_strategy,
                 "top_k_features": args.top_k_features,
                 "top_k_tokens": args.top_k_tokens,

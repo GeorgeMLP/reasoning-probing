@@ -88,13 +88,20 @@ python reasoning_features/scripts/find_reasoning_features.py \
 
 ### Output
 
+The results are organized in the following directory structure:
 ```
-results/layer8/
+results/{setting}/{model}/{dataset}/layer{N}/
 ├── activations.pt          # Cached activations for reuse
 ├── feature_stats.json      # Statistics for all features
 ├── reasoning_features.json # Detected reasoning features
-└── token_analysis.json     # Token dependency analysis
+├── token_analysis.json     # Token dependency analysis
+├── anova_results.json      # ANOVA analysis results
+├── injection_results.json  # Token injection experiment results
+└── {benchmark}/            # Steering experiment results per benchmark
+    └── experiment_summary.json
 ```
+
+Example: `results/initial-setting/gemma-2-9b/s1k/layer12/`
 
 ## Experiment 2: Steering Experiments
 
@@ -265,6 +272,33 @@ python reasoning_features/scripts/run_token_injection_experiment.py \
 |--------|-------------|
 | Most features token-driven | Supports hypothesis: features are shallow |
 | Most features context-dependent | Against hypothesis: features may capture reasoning |
+
+### Preliminary Results
+
+In layer 12 of Gemma-2-9B:
+- **62% average transfer ratio** - Injecting tokens achieves ~62% of reasoning-level activation
+- **50% token-driven** - Half of features strongly respond to token injection
+- **0% context-dependent** - No features are purely context-sensitive
+
+These results support our hypothesis that "reasoning features" are shallow pattern detectors.
+
+## Visualization
+
+Generate plots from experiment results:
+
+```bash
+# Generate all plots for a specific experiment
+python reasoning_features/scripts/plot_results.py \
+    --results-dir results/initial-setting/gemma-2-9b/s1k \
+    --plots-dir plots/s1k
+
+# Generate only injection plots
+python reasoning_features/scripts/plot_results.py \
+    --results-dir results/initial-setting/gemma-2-9b/s1k \
+    --only-injection
+```
+
+Plot categories: `--only-layer-stats`, `--only-distributions`, `--only-token`, `--only-scatter`, `--only-steering`, `--only-anova`, `--only-injection`, `--only-summary`
 
 ## Installation
 

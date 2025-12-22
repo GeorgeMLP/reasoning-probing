@@ -35,13 +35,18 @@ plt.rcParams['axes.labelsize'] = 12
 
 
 def load_experiment_data(experiment_dir: Path) -> dict:
-    """Load all data for an experiment (all layers)."""
+    """Load all data for an experiment (all layers).
+    
+    Expects directory structure: results/setting/model/dataset/layerX/
+    where experiment_dir is the 'dataset' directory containing layer subdirs.
+    """
     data = {
         'layers': [],
         'reasoning_features': {},
         'token_analysis': {},
         'feature_stats': {},
         'steering_results': {},
+        'injection_results': {},
     }
     
     # Find all layer directories
@@ -81,6 +86,12 @@ def load_experiment_data(experiment_dir: Path) -> dict:
                         if layer_idx not in data['steering_results']:
                             data['steering_results'][layer_idx] = {}
                         data['steering_results'][layer_idx][benchmark] = json.load(f)
+        
+        # Load injection results
+        injection_path = layer_dir / 'injection_results.json'
+        if injection_path.exists():
+            with open(injection_path) as f:
+                data['injection_results'][layer_idx] = json.load(f)
     
     return data
 
@@ -1037,6 +1048,216 @@ def plot_all_anova(data: dict, output_dir: Path):
 
 
 # =============================================================================
+# Token Injection Plots
+# =============================================================================
+
+def plot_injection_summary(data: dict, output_dir: Path):
+    """Plot token injection experiment summary."""
+    injection_dir = output_dir / 'injection'
+    injection_dir.mkdir(parents=True, exist_ok=True)
+    
+    if not data.get('injection_results'):
+        print("  No injection results found")
+        return
+    
+    layers = sorted(data['injection_results'].keys())
+    
+    # Collect summary statistics
+    metrics = {
+        'avg_transfer_ratio': [],
+        'pct_token_driven': [],
+        'pct_partially_driven': [],
+        'avg_baseline_activation': [],
+        'avg_reasoning_activation': [],
+    }
+    
+    for layer in layers:
+        inj = data['injection_results'].get(layer, {})
+        summary = inj.get('summary', {})
+        counts = summary.get('classification_counts', {})
+        n_features = summary.get('n_features', 1)
+        
+        metrics['avg_transfer_ratio'].append(summary.get('avg_transfer_ratio', 0))
+        metrics['avg_baseline_activation'].append(summary.get('avg_baseline_activation', 0))
+        metrics['avg_reasoning_activation'].append(summary.get('avg_reasoning_activation', 0))
+        
+        pct_token = 100 * counts.get('token_driven', 0) / n_features if n_features > 0 else 0
+        pct_partial = 100 * counts.get('partially_token_driven', 0) / n_features if n_features > 0 else 0
+        metrics['pct_token_driven'].append(pct_token)
+        metrics['pct_partially_driven'].append(pct_partial)
+    
+    # Plot 1: Transfer ratio and token-driven percentages
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+    # Transfer ratio
+    ax = axes[0]
+    ax.bar(range(len(layers)), metrics['avg_transfer_ratio'], color='#C44E52', alpha=0.8)
+    ax.axhline(0.5, color='black', linestyle='--', alpha=0.5, label='Token-driven threshold')
+    ax.set_xticks(range(len(layers)))
+    ax.set_xticklabels([f'L{l}' for l in layers])
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Average Transfer Ratio')
+    ax.set_title('Token Injection Transfer Ratio')
+    ax.legend(fontsize=8)
+    for i, v in enumerate(metrics['avg_transfer_ratio']):
+        ax.text(i, v + 0.02, f'{v:.2f}', ha='center', fontsize=9)
+    
+    # Percentage token-driven
+    ax = axes[1]
+    x = np.arange(len(layers))
+    width = 0.35
+    ax.bar(x - width/2, metrics['pct_token_driven'], width, label='Token-driven', color='#C44E52', alpha=0.8)
+    ax.bar(x + width/2, metrics['pct_partially_driven'], width, label='Partially token-driven', color='#DD8452', alpha=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'L{l}' for l in layers])
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Percentage of Features (%)')
+    ax.set_title('Feature Classification by Token Dependency')
+    ax.legend(fontsize=8)
+    
+    # Activation comparison
+    ax = axes[2]
+    ax.bar(x - width/2, metrics['avg_baseline_activation'], width, label='Baseline', color='#4C72B0', alpha=0.8)
+    ax.bar(x + width/2, metrics['avg_reasoning_activation'], width, label='Reasoning', color='#55A868', alpha=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'L{l}' for l in layers])
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Mean Activation')
+    ax.set_title('Baseline vs Reasoning Activation')
+    ax.legend(fontsize=8)
+    
+    plt.tight_layout()
+    plt.savefig(injection_dir / 'injection_summary.png', bbox_inches='tight')
+    plt.close()
+
+
+def plot_injection_per_feature(data: dict, output_dir: Path):
+    """Plot injection results for each feature."""
+    injection_dir = output_dir / 'injection'
+    injection_dir.mkdir(parents=True, exist_ok=True)
+    
+    if not data.get('injection_results'):
+        return
+    
+    for layer, inj_data in sorted(data['injection_results'].items()):
+        features = inj_data.get('features', [])
+        if not features:
+            continue
+        
+        # Transfer ratios by strategy
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        
+        strategies = ['prepend', 'intersperse', 'replace']
+        colors = ['#C44E52', '#DD8452', '#4C72B0']
+        
+        for ax, strategy, color in zip(axes, strategies, colors):
+            transfer_ratios = []
+            feature_indices = []
+            
+            for f in features:
+                strat_data = f.get('strategies', {}).get(strategy, {})
+                transfer_ratios.append(strat_data.get('transfer_ratio', 0))
+                feature_indices.append(f.get('feature_index', 0))
+            
+            ax.bar(range(len(transfer_ratios)), transfer_ratios, color=color, alpha=0.8)
+            ax.axhline(0.5, color='black', linestyle='--', alpha=0.5, label='Token-driven threshold')
+            ax.axhline(0.2, color='gray', linestyle=':', alpha=0.5, label='Partial threshold')
+            ax.set_xticks(range(len(feature_indices)))
+            ax.set_xticklabels([str(idx) for idx in feature_indices], rotation=45, fontsize=8)
+            ax.set_xlabel('Feature Index')
+            ax.set_ylabel('Transfer Ratio')
+            ax.set_title(f'Strategy: {strategy.capitalize()}')
+            ax.legend(fontsize=7)
+        
+        plt.suptitle(f'Layer {layer}: Transfer Ratios by Injection Strategy', fontsize=14)
+        plt.tight_layout()
+        plt.savefig(injection_dir / f'layer{layer}_injection_strategies.png', bbox_inches='tight')
+        plt.close()
+        
+        # Classification pie chart and distribution
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        
+        # Classification counts
+        classifications = [f.get('classification', 'unknown') for f in features]
+        class_counts = {}
+        for c in classifications:
+            class_counts[c] = class_counts.get(c, 0) + 1
+        
+        colors_pie = {
+            'token_driven': '#C44E52', 
+            'partially_token_driven': '#DD8452',
+            'weakly_token_driven': '#55A868',
+            'context_dependent': '#4C72B0',
+        }
+        
+        ax = axes[0]
+        labels = list(class_counts.keys())
+        sizes = list(class_counts.values())
+        pie_colors = [colors_pie.get(l, 'gray') for l in labels]
+        ax.pie(sizes, labels=labels, colors=pie_colors, autopct='%1.1f%%', startangle=90)
+        ax.set_title('Feature Classification Distribution')
+        
+        # Best transfer ratio distribution
+        ax = axes[1]
+        best_ratios = [f.get('best_transfer_ratio', 0) for f in features]
+        ax.hist(best_ratios, bins=15, color='#C44E52', alpha=0.7, edgecolor='white')
+        ax.axvline(0.5, color='black', linestyle='--', label='Token-driven threshold')
+        ax.axvline(0.2, color='gray', linestyle=':', label='Partial threshold')
+        ax.axvline(np.mean(best_ratios), color='red', linestyle='-', 
+                   label=f'Mean: {np.mean(best_ratios):.2f}')
+        ax.set_xlabel('Best Transfer Ratio')
+        ax.set_ylabel('Count')
+        ax.set_title('Distribution of Best Transfer Ratios')
+        ax.legend(fontsize=8)
+        
+        plt.suptitle(f'Layer {layer}: Token Injection Results', fontsize=14)
+        plt.tight_layout()
+        plt.savefig(injection_dir / f'layer{layer}_injection_distribution.png', bbox_inches='tight')
+        plt.close()
+
+
+def plot_injection_activation_comparison(data: dict, output_dir: Path):
+    """Plot activation comparison between baseline, injected, and reasoning."""
+    injection_dir = output_dir / 'injection'
+    injection_dir.mkdir(parents=True, exist_ok=True)
+    
+    if not data.get('injection_results'):
+        return
+    
+    for layer, inj_data in sorted(data['injection_results'].items()):
+        features = inj_data.get('features', [])
+        if not features:
+            continue
+        
+        # Activation comparison bar chart
+        fig, ax = plt.subplots(figsize=(14, 6))
+        
+        x = np.arange(len(features))
+        width = 0.25
+        
+        baseline_means = [f.get('baseline_mean', 0) for f in features]
+        reasoning_means = [f.get('reasoning_mean', 0) for f in features]
+        # Use prepend strategy as the main injected result
+        injected_means = [f.get('strategies', {}).get('prepend', {}).get('injected_mean', 0) for f in features]
+        feature_indices = [f.get('feature_index', 0) for f in features]
+        
+        ax.bar(x - width, baseline_means, width, label='Non-reasoning (baseline)', color='#4C72B0', alpha=0.8)
+        ax.bar(x, injected_means, width, label='Non-reasoning + injected tokens', color='#DD8452', alpha=0.8)
+        ax.bar(x + width, reasoning_means, width, label='Reasoning text', color='#55A868', alpha=0.8)
+        
+        ax.set_xticks(x)
+        ax.set_xticklabels([str(idx) for idx in feature_indices], rotation=45)
+        ax.set_xlabel('Feature Index')
+        ax.set_ylabel('Mean Activation')
+        ax.set_title(f'Layer {layer}: Activation Comparison')
+        ax.legend(loc='upper right')
+        
+        plt.tight_layout()
+        plt.savefig(injection_dir / f'layer{layer}_activation_comparison.png', bbox_inches='tight')
+        plt.close()
+
+
+# =============================================================================
 # Summary Plot
 # =============================================================================
 
@@ -1131,10 +1352,11 @@ def process_experiment(experiment_dir: Path, plots_dir: Path,
                       plot_scatter: bool = True,
                       plot_steering: bool = True,
                       plot_anova_: bool = True,
+                      plot_injection_: bool = True,
                       plot_summary_: bool = True):
     """Process a single experiment and generate all plots.
     
-    Expects directory structure: results/setting/model/layerX/
+    Expects directory structure: results/setting/model/dataset/layerX/
     """
     print(f"\nProcessing: {experiment_dir}")
     
@@ -1189,6 +1411,13 @@ def process_experiment(experiment_dir: Path, plots_dir: Path,
             plot_anova_distributions(anova_data, output_dir)
             plot_anova_by_layer(anova_data, output_dir)
             plot_anova_cell_means(anova_data, output_dir)
+    
+    if plot_injection_:
+        if data.get('injection_results'):
+            print("  Generating injection experiment plots...")
+            plot_injection_summary(data, output_dir)
+            plot_injection_per_feature(data, output_dir)
+            plot_injection_activation_comparison(data, output_dir)
     
     if plot_summary_:
         print("  Generating summary plot...")
@@ -1272,6 +1501,11 @@ def parse_args():
         help='Only generate ANOVA plots',
     )
     parser.add_argument(
+        '--only-injection',
+        action='store_true',
+        help='Only generate injection experiment plots',
+    )
+    parser.add_argument(
         '--only-summary',
         action='store_true',
         help='Only generate summary plot',
@@ -1309,6 +1543,11 @@ def parse_args():
         help='Skip ANOVA plots',
     )
     parser.add_argument(
+        '--no-injection',
+        action='store_true',
+        help='Skip injection experiment plots',
+    )
+    parser.add_argument(
         '--no-summary',
         action='store_true',
         help='Skip summary plot',
@@ -1326,7 +1565,8 @@ def main():
     
     # Determine which plots to generate
     only_flags = [args.only_layer_stats, args.only_distributions, args.only_token,
-                  args.only_scatter, args.only_steering, args.only_anova, args.only_summary]
+                  args.only_scatter, args.only_steering, args.only_anova, 
+                  args.only_injection, args.only_summary]
     
     if any(only_flags):
         # Only specified categories
@@ -1336,6 +1576,7 @@ def main():
         plot_scatter = args.only_scatter
         plot_steering = args.only_steering
         plot_anova = args.only_anova
+        plot_injection = args.only_injection
         plot_summary = args.only_summary
     else:
         # All categories except excluded
@@ -1345,6 +1586,7 @@ def main():
         plot_scatter = not args.no_scatter
         plot_steering = not args.no_steering
         plot_anova = not args.no_anova
+        plot_injection = not args.no_injection
         plot_summary = not args.no_summary
     
     print(f"\nPlot categories enabled:")
@@ -1354,6 +1596,7 @@ def main():
     print(f"  Scatter plots: {plot_scatter}")
     print(f"  Steering results: {plot_steering}")
     print(f"  ANOVA: {plot_anova}")
+    print(f"  Injection: {plot_injection}")
     print(f"  Summary: {plot_summary}")
     
     # Find experiments
@@ -1385,6 +1628,7 @@ def main():
             plot_scatter=plot_scatter,
             plot_steering=plot_steering,
             plot_anova_=plot_anova,
+            plot_injection_=plot_injection,
             plot_summary_=plot_summary,
         )
     

@@ -9,7 +9,9 @@ This document provides mathematical definitions, intuitive justifications, and d
 3. [Token Dependency Analysis](#3-token-dependency-analysis)
 4. [ANOVA Analysis](#4-anova-analysis)
 5. [Steering Experiments](#5-steering-experiments)
-6. [Limitations and Future Work](#6-limitations-and-future-work)
+6. [Preliminary Results Analysis](#6-preliminary-results-analysis)
+7. [Token Injection Experiments](#7-token-injection-experiments-causal-test)
+8. [Limitations and Future Work](#8-limitations-and-future-work)
 
 ---
 
@@ -260,7 +262,29 @@ python reasoning_features/scripts/run_steering_experiment.py \
 
 ---
 
-## 6. Limitations and Future Work
+## 6. Preliminary Results Analysis
+
+### 6.1 Token Injection Experiment Results (Layer 12, Gemma-2-9B)
+
+Initial experiments on 10 reasoning features from layer 12 show:
+
+| Classification | Count | Percentage |
+|---------------|-------|------------|
+| Token-driven | 5 | 50% |
+| Partially token-driven | 4 | 40% |
+| Weakly token-driven | 1 | 10% |
+| Context-dependent | 0 | 0% |
+
+**Key Findings:**
+- **Average transfer ratio: 62%** - Injecting top tokens into non-reasoning text achieves 62% of reasoning-level activation
+- **All features show some token dependency** - No feature was purely context-dependent
+- **Prepend strategy works best** - Simply prepending tokens is most effective
+
+### 6.2 Interpretation
+
+These results strongly support the hypothesis that "reasoning features" are largely shallow pattern detectors rather than genuine reasoning mechanisms. The high transfer ratio means that simply prepending a few tokens (like "Let", "Therefore", mathematical notation) can recover most of the activation difference - suggesting the features respond to vocabulary, not reasoning structure.
+
+---
 
 ### 6.1 Current Limitations
 
@@ -270,15 +294,99 @@ python reasoning_features/scripts/run_steering_experiment.py \
 
 3. **Causal interpretation:** Correlation between feature activation and reasoning text does not imply the feature is causally involved in reasoning computation.
 
-### 6.2 Future Directions
+## 7. Token Injection Experiments (Causal Test)
 
-1. **Token injection experiments:** Test whether injecting reasoning tokens into non-reasoning text activates features (would support token-driven interpretation).
+### 7.1 Motivation
 
-2. **Gradient-based attribution:** Use input gradients to identify which tokens causally drive feature activations.
+ANOVA analysis shows correlational relationships, but cannot prove causation. The token injection experiment provides direct causal evidence for whether features are token-driven.
 
-3. **Cross-model validation:** Replicate findings across different model families and sizes.
+### 7.2 Experimental Design
 
-4. **Mechanistic analysis:** Study how features interact with attention patterns and other model components.
+1. **Baseline**: Measure feature activation on non-reasoning text
+2. **Target**: Measure feature activation on reasoning text  
+3. **Injection**: Inject the feature's top-k tokens into non-reasoning text
+4. **Comparison**: If injected activation ≈ reasoning activation, the feature is token-driven
+
+### 7.3 Injection Strategies
+
+| Strategy | Description |
+|----------|-------------|
+| **Prepend** | Add tokens at the beginning of text |
+| **Intersperse** | Distribute tokens throughout the text |
+| **Replace** | Replace random words with tokens |
+
+### 7.4 Key Metrics
+
+**Transfer Ratio**:
+$$\text{TransferRatio} = \frac{\bar{a}_{\text{injected}} - \bar{a}_{\text{baseline}}}{\bar{a}_{\text{reasoning}} - \bar{a}_{\text{baseline}}}$$
+
+This measures what fraction of the reasoning-level activation is achieved by token injection alone.
+
+**Statistical Significance**: Independent t-test comparing injected vs. baseline activations, with Cohen's d for effect size.
+
+### 7.5 Classification Criteria
+
+| Classification | Criteria | Interpretation |
+|---------------|----------|----------------|
+| **Token-driven** | Transfer ratio > 0.5, Cohen's d > 0.3, p < 0.01 | Feature is a shallow token detector |
+| **Partially token-driven** | Transfer ratio 0.2-0.5, significant | Tokens partially explain activation |
+| **Weakly token-driven** | Transfer ratio < 0.2, but significant | Tokens have minor effect |
+| **Context-dependent** | Not significant | Feature may capture deeper patterns |
+
+### 7.6 Interpreting Results
+
+A high average transfer ratio (e.g., 62% as observed in preliminary experiments) indicates that:
+- Simply injecting top tokens recovers most of the activation difference
+- Features are primarily responding to specific vocabulary, not reasoning structure
+- "Reasoning features" are better characterized as "reasoning vocabulary detectors"
+
+### 7.7 Rigorous Transfer Ratio Evaluation
+
+To determine whether a transfer ratio is "high" or "low", we recommend:
+
+1. **Null baseline comparison**: Compare against transfer ratios obtained by injecting random tokens (should be near 0)
+2. **Bootstrap confidence intervals**: Report 95% CIs on transfer ratios
+3. **Effect size standards** (following Cohen's conventions):
+   - Strong token-driven: Transfer ratio > 0.5, Cohen's d > 0.8
+   - Moderate: Transfer ratio 0.3-0.5, Cohen's d 0.5-0.8  
+   - Weak: Transfer ratio < 0.3, Cohen's d < 0.5
+
+### 7.8 Usage
+
+```bash
+python reasoning_features/scripts/run_token_injection_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --reasoning-features results/layer8/reasoning_features.json \
+    --layer 8 \
+    --reasoning-dataset s1k \
+    --top-k-features 10 \
+    --n-samples 100 \
+    --save-dir results/layer8
+```
+
+---
+
+## 8. Limitations and Future Work
+
+### 8.1 Current Limitations
+
+1. **Token set selection:** The ANOVA analysis depends on which tokens we classify as "reasoning tokens." Different selections may yield different results.
+
+2. **Context confounds:** Even with 2×2 ANOVA, we cannot fully rule out unmeasured confounds. Features may respond to patterns we haven't identified.
+
+3. **Causal interpretation:** Correlation between feature activation and reasoning text does not imply the feature is causally involved in reasoning computation.
+
+4. **Injection strategy effects:** Different injection strategies may yield different results; prepending tends to work best but may not reflect natural token distributions.
+
+### 8.2 Future Directions
+
+1. **Gradient-based attribution:** Use input gradients to identify which tokens causally drive feature activations.
+
+2. **Cross-model validation:** Replicate findings across different model families and sizes.
+
+3. **Mechanistic analysis:** Study how features interact with attention patterns and other model components.
+
+4. **Random baseline experiments:** Compare token injection results against random token injection to establish statistical baselines.
 
 ---
 
