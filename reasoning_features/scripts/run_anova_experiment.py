@@ -474,7 +474,7 @@ def main():
         })
         
         min_samples = min(n_r_with, n_r_without, n_nr_with, n_nr_without)
-        if min_samples < 10:
+        if min_samples < 100:
             print(f"  Feature {feat_idx}: Skipping (min samples = {min_samples})")
             continue
         
