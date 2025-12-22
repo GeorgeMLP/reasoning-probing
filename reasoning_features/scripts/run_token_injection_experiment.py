@@ -54,7 +54,7 @@ from scipy import stats
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
-def load_top_tokens_for_feature(token_analysis_path: str, feature_index: int, top_k: int = 20) -> list:
+def load_top_tokens_for_feature(token_analysis_path: str, feature_index: int, top_k: int = 30) -> list:
     """Load top-k tokens for a specific feature."""
     with open(token_analysis_path) as f:
         data = json.load(f)
@@ -108,7 +108,7 @@ def inject_tokens_into_text(text: str, tokens: list, n_inject: int = 3, strategy
 
 
 def get_feature_activation(model, sae, tokenizer, texts: list, layer: int, 
-                           feature_index: int, device: str, batch_size: int = 8) -> np.ndarray:
+                           feature_index: int, device: str, batch_size: int = 32) -> np.ndarray:
     """Get feature activations for a batch of texts."""
     activations = []
     hook_name = f"blocks.{layer}.hook_resid_post"
@@ -144,7 +144,9 @@ def get_feature_activation(model, sae, tokenizer, texts: list, layer: int,
 
 
 def run_injection_experiment(
-    model, sae, tokenizer, 
+    model,
+    sae,
+    tokenizer,
     feature_index: int,
     top_tokens: list,
     nonreasoning_texts: list,
@@ -260,7 +262,7 @@ def main():
                         help="Path to reasoning_features.json")
     parser.add_argument("--layer", type=int, required=True)
     parser.add_argument("--top-k-features", type=int, default=10)
-    parser.add_argument("--top-k-tokens", type=int, default=20)
+    parser.add_argument("--top-k-tokens", type=int, default=30)
     parser.add_argument("--n-inject", type=int, default=3,
                         help="Number of tokens to inject per text")
     parser.add_argument("--n-samples", type=int, default=100,
@@ -396,7 +398,7 @@ def main():
             "classification_counts": {
                 cls: classifications.count(cls) 
                 for cls in ["token_driven", "partially_token_driven", 
-                           "weakly_token_driven", "context_dependent"]
+                            "weakly_token_driven", "context_dependent"]
             },
             "avg_transfer_ratio": float(avg_transfer),
             "avg_baseline_activation": float(np.mean([r["baseline_mean"] for r in all_results])),
