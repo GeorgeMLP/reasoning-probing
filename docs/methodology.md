@@ -337,9 +337,79 @@ This requires:
 - If $\eta^2_{\text{Behavior}} > \eta^2_{\text{Token}}$: Features capture genuine reasoning (surprising)
 - If both effects are large with significant interaction: Features respond to token-behavior combinations
 
-### 5.8 Implementation Details
+### 5.8 Token-Level vs. Text-Level ANOVA
 
-#### 5.8.1 Supported Datasets
+#### 5.8.1 The Problem with Text-Level ANOVA
+
+The original text-level ANOVA design has a critical limitation: it uses **max activation across the sequence** for each text. This aggregation has two problems:
+
+1. **Information loss:** The max operation discards information about which specific tokens drove the activation
+2. **Token coverage:** Texts classified as "not having reasoning tokens" may still contain many OTHER tokens that activate the feature
+
+**Empirical Evidence:** In our experiments, text-level ANOVA often shows "behavior-dominated" results even for features that respond strongly to specific tokens. For example:
+
+| Feature | Text-Level η²_behavior | Text-Level η²_token | Result |
+|---------|------------------------|---------------------|--------|
+| 8684    | 0.54                   | 0.015               | Behavior-dominated |
+| 12481   | 0.20                   | 0.14                | Mixed |
+
+#### 5.8.2 Token-Level ANOVA Design
+
+We developed a refined approach that operates at the **token level**:
+
+**Unit of analysis:** Each token position (not each text)
+
+**Factors:**
+- **Token Factor:** Is this specific token in the feature's top-k token set?
+- **Context Factor:** Is this text from the reasoning corpus?
+
+**Dependent variable:** Feature activation at THIS token position
+
+**Key advantage:** This directly tests whether individual tokens drive activation, regardless of surrounding context.
+
+#### 5.8.3 Token-Level Results
+
+Token-level ANOVA reveals a more nuanced picture:
+
+| Feature | η²_token (Token-Level) | η²_context (Token-Level) | Token Effect in R | Token Effect in NR |
+|---------|------------------------|--------------------------|-------------------|-------------------|
+| 8684    | 0.0005                 | 0.24                     | 0.63              | -0.01             |
+| 12481   | 0.087                  | 0.023                    | 14.09             | 1.70              |
+
+**Key Insight:** Feature 12481 IS token-dominated at the token level, with a strong token effect (14.09) that partially transfers to non-reasoning context (1.70). Feature 8684's tokens only work in reasoning context.
+
+#### 5.8.4 Token Consistency Metric
+
+We introduce a new metric to measure whether tokens work consistently across contexts:
+
+$$\text{TokenConsistency} = 1 - \frac{|\text{TokenEffect}_R - \text{TokenEffect}_{NR}|}{\max(|\text{TokenEffect}_R|, |\text{TokenEffect}_{NR}|) + \epsilon}$$
+
+- **High consistency (>0.5):** Token effect is stable across contexts → genuine token-driven feature
+- **Low consistency (<0.5):** Token effect depends on context → feature learns token+context interactions
+
+#### 5.8.5 Context-Agnostic Token Analysis
+
+To control for confounding, we analyze only tokens that appear in BOTH reasoning and non-reasoning text:
+
+1. Filter feature's top tokens to those with occurrences in both contexts
+2. Run token-level ANOVA using only these "context-agnostic" tokens
+3. Check if same tokens produce similar activations regardless of context
+
+**Finding:** Even "token-dominated" features show context modulation. Feature 12481's tokens activate 8x more in reasoning context (14.5 vs 1.7), suggesting features learn **token+context interactions**, not pure token patterns.
+
+#### 5.8.6 Classification of Features
+
+Based on token-level analysis, features fall into three categories:
+
+| Category | Criteria | Interpretation |
+|----------|----------|----------------|
+| **Token-Dominated** | η²_token > 2×η²_context, TokenConsistency > 0.5 | Feature responds to specific tokens regardless of context |
+| **Context-Dominated** | η²_context > 2×η²_token, TokenConsistency < 0.2 | Same tokens behave differently based on surrounding context |
+| **Confounded** | TokenConsistency < 0.3, high context effect | Tokens only work in reasoning context; cannot separate factors |
+
+### 5.9 Implementation Details
+
+#### 5.9.1 Supported Datasets
 
 The ANOVA experiment supports three reasoning dataset configurations:
 
@@ -351,7 +421,7 @@ The ANOVA experiment supports three reasoning dataset configurations:
 
 The non-reasoning baseline is always drawn from `monology/pile-uncopyrighted`.
 
-#### 5.8.2 Text Splitting Strategy
+#### 5.9.2 Text Splitting Strategy
 
 Long reasoning chains are split into sentence-level chunks to increase sample size for the 2×2 design:
 
@@ -366,7 +436,7 @@ Parameters:
 
 This typically yields 10-50 chunks per reasoning chain, significantly expanding the sample pool.
 
-#### 5.8.3 Token-Based Classification
+#### 5.9.3 Token-Based Classification
 
 For each feature, texts are classified based on presence of the feature's top-k tokens:
 
@@ -379,7 +449,7 @@ def text_contains_tokens(text, tokens, threshold=1):
 
 The top tokens are loaded from the token analysis results produced by `find_reasoning_features.py`.
 
-#### 5.8.4 Activation Collection
+#### 5.9.4 Activation Collection
 
 For each text in each condition:
 1. Tokenize with model's tokenizer (padding, truncation to `max_length`)
@@ -388,7 +458,7 @@ For each text in each condition:
 4. Encode through SAE to get feature activations
 5. Take maximum activation across sequence positions
 
-#### 5.8.5 ANOVA Computation
+#### 5.9.5 ANOVA Computation
 
 For balanced design with $n$ samples per cell:
 
@@ -412,7 +482,7 @@ $$SS_{\text{behavior}} = 2n \cdot [(\bar{a}_{\text{reasoning}} - \bar{a}_{\cdot\
 
 **F-statistics and p-values:** Computed using the F-distribution with appropriate degrees of freedom.
 
-#### 5.8.6 Decision Criteria
+#### 5.9.6 Decision Criteria
 
 A feature is classified as:
 
@@ -426,8 +496,9 @@ A feature is classified as:
 
 The threshold of 0.06 corresponds to a "medium" effect size in the η² scale.
 
-#### 5.8.7 Usage Example
+#### 5.9.7 Usage Examples
 
+**Text-Level ANOVA (Original Approach):**
 ```bash
 # Run ANOVA experiment for layer 8 features using s1K dataset
 python reasoning_features/scripts/run_anova_experiment.py \
@@ -438,23 +509,40 @@ python reasoning_features/scripts/run_anova_experiment.py \
     --top-k-tokens 10 \
     --n-per-condition 200 \
     --save-dir results/anova/layer8
-
-# Run with General Inquiry CoT dataset
-python reasoning_features/scripts/run_anova_experiment.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --layer 8 \
-    --reasoning-dataset general_inquiry_cot \
-    --save-dir results/anova/layer8/general_inquiry_cot
-
-# Run with combined dataset
-python reasoning_features/scripts/run_anova_experiment.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --layer 8 \
-    --reasoning-dataset combined \
-    --save-dir results/anova/layer8/combined
 ```
 
-#### 5.8.8 Output Format
+**Token-Level ANOVA (Recommended):**
+```bash
+# Run token-level ANOVA with feature-specific tokens
+python reasoning_features/scripts/run_anova_tokenwise.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --top-k-features 10 \
+    --top-k-tokens 50 \
+    --token-strategy feature_specific \
+    --save-dir results/anova/layer8/tokenwise
+
+# Run with global reasoning tokens (tokens overrepresented in reasoning text)
+python reasoning_features/scripts/run_anova_tokenwise.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --token-strategy global_reasoning \
+    --global-top-k 300 \
+    --save-dir results/anova/layer8/tokenwise_global
+```
+
+**Refined ANOVA (Context-Agnostic Tokens Only):**
+```bash
+# Analyze only tokens appearing in both contexts
+python reasoning_features/scripts/run_anova_refined.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --top-k-features 10 \
+    --min-occurrences-both 5 \
+    --save-dir results/anova/layer8/refined
+```
+
+#### 5.9.8 Output Format
 
 The experiment produces `anova_results.json` with the following structure:
 
