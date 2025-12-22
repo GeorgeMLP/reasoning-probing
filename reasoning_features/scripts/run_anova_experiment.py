@@ -158,6 +158,12 @@ def parse_args():
         help="Samples per ANOVA condition (default: 200)",
     )
     parser.add_argument(
+        "--threshold",
+        type=int,
+        default=1,
+        help="Threshold for token presence (default: 1)",
+    )
+    parser.add_argument(
         "--max-length",
         type=int,
         default=256,
@@ -259,15 +265,16 @@ def run_anova_for_feature(
     max_length: int,
     batch_size: int,
     device: str,
+    token_presence_threshold: int = 1,
 ) -> Optional[ANOVAResult]:
     """Run ANOVA analysis for a single feature."""
     from reasoning_features.datasets.anova import text_contains_tokens
     
     # Classify sentences by token presence
-    reasoning_with_tokens = [s for s in reasoning_sentences if text_contains_tokens(s, feature_tokens)]
-    reasoning_no_tokens = [s for s in reasoning_sentences if not text_contains_tokens(s, feature_tokens)]
-    nonreasoning_with_tokens = [s for s in nonreasoning_sentences if text_contains_tokens(s, feature_tokens)]
-    nonreasoning_no_tokens = [s for s in nonreasoning_sentences if not text_contains_tokens(s, feature_tokens)]
+    reasoning_with_tokens = [s for s in reasoning_sentences if text_contains_tokens(s, feature_tokens, threshold=token_presence_threshold)]
+    reasoning_no_tokens = [s for s in reasoning_sentences if not text_contains_tokens(s, feature_tokens, threshold=token_presence_threshold)]
+    nonreasoning_with_tokens = [s for s in nonreasoning_sentences if text_contains_tokens(s, feature_tokens, threshold=token_presence_threshold)]
+    nonreasoning_no_tokens = [s for s in nonreasoning_sentences if not text_contains_tokens(s, feature_tokens, threshold=token_presence_threshold)]
     
     # Check if we have enough samples
     min_samples = min(
@@ -451,9 +458,9 @@ def main():
         
         # Quick check: how many sentences match?
         from reasoning_features.datasets.anova import text_contains_tokens
-        n_r_with = sum(1 for s in reasoning_sentences if text_contains_tokens(s, feature_tokens))
+        n_r_with = sum(1 for s in reasoning_sentences if text_contains_tokens(s, feature_tokens, threshold=args.threshold))
         n_r_without = len(reasoning_sentences) - n_r_with
-        n_nr_with = sum(1 for s in nonreasoning_sentences if text_contains_tokens(s, feature_tokens))
+        n_nr_with = sum(1 for s in nonreasoning_sentences if text_contains_tokens(s, feature_tokens, threshold=args.threshold))
         n_nr_without = len(nonreasoning_sentences) - n_nr_with
         
         condition_summaries.append({
@@ -484,6 +491,7 @@ def main():
             max_length=args.max_length,
             batch_size=args.batch_size,
             device=args.device,
+            token_presence_threshold=args.threshold,
         )
         
         if result is not None:
