@@ -3,7 +3,7 @@ for layer in 0 4 8 12 16 20 24; do
         --token-analysis results/initial-setting/gemma-2-9b/s1k/layer$layer/token_analysis.json \
         --reasoning-features results/initial-setting/gemma-2-9b/s1k/layer$layer/reasoning_features.json \
         --layer $layer \
-        --top-k-features 10 \
+        --top-k-features 100 \
         --top-k-tokens 10 \
         --n-inject 3 \
         --n-samples 2000 \
@@ -13,7 +13,7 @@ for layer in 0 4 8 12 16 20 24; do
         --token-analysis results/initial-setting/gemma-2-9b/general_inquiry_cot/layer$layer/token_analysis.json \
         --reasoning-features results/initial-setting/gemma-2-9b/general_inquiry_cot/layer$layer/reasoning_features.json \
         --layer $layer \
-        --top-k-features 10 \
+        --top-k-features 100 \
         --top-k-tokens 10 \
         --n-inject 3 \
         --n-samples 2000 \
