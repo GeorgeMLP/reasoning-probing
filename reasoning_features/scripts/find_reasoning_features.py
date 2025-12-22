@@ -320,10 +320,10 @@ def main():
     feature_token_analyses = []
     
     # Analyze top features
-    features_to_analyze = reasoning_features[:min(20, len(reasoning_features))]
+    features_to_analyze = reasoning_features[:min(args.top_k_features, len(reasoning_features))]
     if not features_to_analyze:
         # If no features meet criteria, analyze top by score anyway
-        features_to_analyze = detector.get_top_features_by_score(20)
+        features_to_analyze = detector.get_top_features_by_score(args.top_k_features)
     
     print(f"\nAnalyzing token dependencies for {len(features_to_analyze)} features...")
     
