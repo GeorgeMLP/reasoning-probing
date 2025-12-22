@@ -31,12 +31,11 @@ reasoning_features/
 ├── utils/              # Utility functions
 │   └── llm_judge.py    # LLM-based answer equivalence checking
 └── scripts/            # Main experiment scripts
-    ├── find_reasoning_features.py   # Find reasoning-correlated features
-    ├── run_steering_experiment.py   # Steering benchmark evaluation
-    ├── run_anova_experiment.py      # Text-level ANOVA (original)
-    ├── run_anova_tokenwise.py       # Token-level ANOVA (recommended) ⭐
-    ├── run_anova_refined.py         # Context-agnostic token analysis
-    └── plot_results.py              # Visualization
+    ├── find_reasoning_features.py        # Find reasoning-correlated features
+    ├── run_anova_experiment.py           # Token-level ANOVA analysis
+    ├── run_token_injection_experiment.py # Causal token injection test ⭐
+    ├── run_steering_experiment.py        # Steering benchmark evaluation
+    └── plot_results.py                   # Visualization
 ```
 
 ## Experiment 1: Finding Reasoning Features
@@ -194,21 +193,7 @@ Because exact string matching would fail for equivalent expressions, we use an L
 
 ## Experiment 3: ANOVA Analysis
 
-Disentangle **token-level cues** from **reasoning behavior** using a 2×2 factorial ANOVA design.
-
-### Two ANOVA Approaches
-
-We provide two complementary ANOVA implementations:
-
-#### 1. Text-Level ANOVA (`run_anova_experiment.py`)
-- **Unit**: Each text sample
-- **Aggregation**: Max activation across sequence
-- **Limitation**: Texts without specific top-k tokens may still contain other activating tokens
-
-#### 2. Token-Level ANOVA (`run_anova_tokenwise.py`) ⭐ Recommended
-- **Unit**: Each token position
-- **Aggregation**: None (raw per-token activation)
-- **Advantage**: Directly tests if individual tokens drive activation
+Disentangle **token-level cues** from **reasoning context** using 2×2 factorial ANOVA.
 
 ### 2×2 Factorial Design
 
@@ -222,81 +207,64 @@ We provide two complementary ANOVA implementations:
 | Metric | Description | Interpretation |
 |--------|-------------|----------------|
 | **η²_token** | Variance explained by token presence | High = token-dependent |
-| **η²_context** | Variance explained by reasoning vs. not | High = context-sensitive |
-| **Token Consistency** | Do tokens work similarly across contexts? | High = true token-driven |
-| **Token Effect** | Activation difference (with vs without token) | Magnitude of token influence |
-
-### Token-Level Results Summary
-
-Our experiments reveal that features fall into three categories:
-
-| Category | Criteria | Interpretation |
-|----------|----------|----------------|
-| **Token-Dominated** | High η²_token, consistency > 0.5 | Feature responds to specific tokens |
-| **Context-Modulated** | Tokens work differently by context | Feature learns token+context interactions |
-| **Confounded** | Tokens only work in reasoning context | Cannot separate token from context |
+| **η²_context** | Variance explained by context | High = context-sensitive |
 
 ### Usage
 
-**Token-Level ANOVA (Recommended):**
-```bash
-# Run token-level ANOVA with feature-specific tokens
-python reasoning_features/scripts/run_anova_tokenwise.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --layer 8 \
-    --top-k-features 10 \
-    --token-strategy feature_specific \
-    --n-reasoning-texts 1000 \
-    --n-nonreasoning-texts 2000 \
-    --save-dir results/anova/layer8/tokenwise
-
-# Compare with global reasoning tokens
-python reasoning_features/scripts/run_anova_tokenwise.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --layer 8 \
-    --token-strategy global_reasoning \
-    --global-top-k 300 \
-    --save-dir results/anova/layer8/tokenwise_global
-```
-
-**Refined ANOVA (Context-Agnostic Tokens Only):**
-```bash
-# Analyze only tokens that appear in BOTH contexts
-python reasoning_features/scripts/run_anova_refined.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --layer 8 \
-    --min-occurrences-both 5 \
-    --save-dir results/anova/layer8/refined
-```
-
-**Text-Level ANOVA (Original):**
 ```bash
 python reasoning_features/scripts/run_anova_experiment.py \
     --token-analysis results/layer8/token_analysis.json \
     --layer 8 \
-    --reasoning-dataset s1k \
-    --top-k-features 50 \
-    --n-per-condition 200 \
-    --save-dir results/anova/layer8
+    --top-k-features 10 \
+    --n-reasoning-texts 500 \
+    --n-nonreasoning-texts 2000 \
+    --save-dir results/layer8
 ```
 
-### Output
+## Experiment 4: Token Injection (Causal Test) ⭐
 
-```
-results/anova/layer8/
-├── anova_results.json          # Text-level ANOVA results
-├── tokenwise_anova_results.json # Token-level ANOVA results
-├── refined_anova_results.json   # Context-agnostic analysis
-└── condition_summaries.json     # Token distribution by condition
+**The key causal experiment**: If a feature is truly a "token detector", injecting those tokens into non-reasoning text should activate the feature.
+
+### Experimental Design
+
+1. Take non-reasoning text samples
+2. Inject feature's top tokens (prepend, intersperse, or replace)
+3. Measure activation before and after injection
+4. Compare to activation on actual reasoning text
+
+### Key Metrics
+
+| Metric | Description | Interpretation |
+|--------|-------------|----------------|
+| **Transfer Ratio** | (Injected activation) / (Reasoning activation) | High = token-driven |
+| **Activation Increase** | Post-injection - pre-injection | Significant = tokens matter |
+
+### Classification
+
+| Classification | Criteria | Interpretation |
+|---------------|----------|----------------|
+| **Token-driven** | Transfer ratio > 0.5, significant | Shallow pattern detector |
+| **Partially token-driven** | Transfer ratio 0.2-0.5 | Mixed behavior |
+| **Context-dependent** | Transfer ratio < 0.2 | May capture reasoning structure |
+
+### Usage
+
+```bash
+python reasoning_features/scripts/run_token_injection_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --reasoning-features results/layer8/reasoning_features.json \
+    --layer 8 \
+    --top-k-features 10 \
+    --n-samples 100 \
+    --save-dir results/layer8
 ```
 
 ### Interpretation
 
-| Finding | Interpretation |
-|---------|----------------|
-| High token consistency, η²_token dominant | Feature is a token detector |
-| Low token consistency, same tokens different activation | Feature learns token+context patterns |
-| Tokens only work in reasoning context | Feature is confounded with context |
+| Result | Implication |
+|--------|-------------|
+| Most features token-driven | Supports hypothesis: features are shallow |
+| Most features context-dependent | Against hypothesis: features may capture reasoning |
 
 ## Installation
 
