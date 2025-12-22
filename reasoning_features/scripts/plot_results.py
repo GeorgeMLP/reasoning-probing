@@ -52,7 +52,7 @@ def load_experiment_data(experiment_dir: Path) -> dict:
     # Find all layer directories
     layer_dirs = sorted([d for d in experiment_dir.iterdir() 
                         if d.is_dir() and d.name.startswith('layer')],
-                       key=lambda d: int(d.name.replace('layer', '')))
+                        key=lambda d: int(d.name.replace('layer', '')))
     
     for layer_dir in layer_dirs:
         layer_idx = int(layer_dir.name.replace('layer', ''))
@@ -822,7 +822,7 @@ def plot_anova_distributions(anova_data: dict, output_dir: Path):
         y_vals = [all_eta_context[i] for i in range(len(mask)) if mask[i]]
         if x_vals:
             ax.scatter(x_vals, y_vals, c=colors.get(dom_type, 'gray'),
-                      label=f'{dom_type.capitalize()} ({len(x_vals)})', alpha=0.6, s=50)
+                       label=f'{dom_type.capitalize()} ({len(x_vals)})', alpha=0.6, s=50)
     
     # Add diagonal line
     max_val = max(max(all_eta_token), max(all_eta_context))
@@ -1346,14 +1346,14 @@ def plot_summary(data: dict, output_dir: Path, experiment_name: str):
 # =============================================================================
 
 def process_experiment(experiment_dir: Path, plots_dir: Path, 
-                      plot_layer_stats: bool = True,
-                      plot_distributions: bool = True,
-                      plot_token: bool = True,
-                      plot_scatter: bool = True,
-                      plot_steering: bool = True,
-                      plot_anova_: bool = True,
-                      plot_injection_: bool = True,
-                      plot_summary_: bool = True):
+                       plot_layer_stats: bool = True,
+                       plot_distributions: bool = True,
+                       plot_token: bool = True,
+                       plot_scatter: bool = True,
+                       plot_steering: bool = True,
+                       plot_anova_: bool = True,
+                       plot_injection_: bool = True,
+                       plot_summary_: bool = True):
     """Process a single experiment and generate all plots.
     
     Expects directory structure: results/setting/model/dataset/layerX/
@@ -1432,7 +1432,7 @@ def find_experiments(results_dir: Path) -> list[Path]:
     
     # Check if this directory contains layer subdirs
     layer_dirs = [d for d in results_dir.iterdir() 
-                 if d.is_dir() and d.name.startswith('layer')]
+                  if d.is_dir() and d.name.startswith('layer')]
     if layer_dirs:
         experiments.append(results_dir)
         return experiments
