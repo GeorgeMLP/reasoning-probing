@@ -307,13 +307,43 @@ ANOVA analysis shows correlational relationships, but cannot prove causation. Th
 3. **Injection**: Inject the feature's top-k tokens into non-reasoning text
 4. **Comparison**: If injected activation ≈ reasoning activation, the feature is token-driven
 
+### 7.2.1 Why Contextual Strategies?
+
+Initial experiments revealed that many features are not triggered by individual tokens, but by **token sequences** or **positional patterns**:
+
+- **Syntactic patterns**: "to [verb]" constructions (e.g., "to identify", "to consider")
+- **Modal constructions**: "I [modal verb]" patterns (e.g., "I need", "I should")
+- **List structures**: Comma-separated items
+- **Phrasal units**: Multi-word expressions
+
+These features are still **shallow pattern detectors** - they don't capture reasoning structure, just slightly more sophisticated lexical patterns. Contextual injection strategies test whether these sequence-sensitive features can be activated by injecting the appropriate token combinations.
+
 ### 7.3 Injection Strategies
 
+We test both simple and contextual injection strategies:
+
+**Simple Strategies** (baseline):
 | Strategy | Description |
 |----------|-------------|
 | **Prepend** | Add tokens at the beginning of text |
+| **Append** | Add tokens at the end of text |
 | **Intersperse** | Distribute tokens throughout the text |
 | **Replace** | Replace random words with tokens |
+
+**Contextual Strategies** (token + surrounding context):
+| Strategy | Description | Example |
+|----------|-------------|---------|
+| **Bigram Before** | Inject [context, token] pairs | "to identify" (if "to" often precedes "identify") |
+| **Bigram After** | Inject [token, context] pairs | "need to" (if "to" often follows "need") |
+| **Trigram** | Inject [before, token, after] triplets | "to identify the" |
+| **Comma List** | Inject tokens as comma-separated list | "first, second, third" |
+
+Contextual strategies are designed to capture features that are sensitive to token sequences rather than individual tokens, such as:
+- Features that activate on verbs only after "to"
+- Features that activate on "I" only before "need" or "should"
+- Features that activate on items in enumerated lists
+
+**Injection Count**: Since contextual strategies inject multi-token sequences (bigrams/trigrams), we inject fewer of them (default: 2 sequences for contextual strategies vs. 3 tokens for simple strategies) to avoid overwhelming the text with injected content.
 
 ### 7.4 Key Metrics
 
@@ -354,6 +384,7 @@ To determine whether a transfer ratio is "high" or "low", we recommend:
 ### 7.8 Usage
 
 ```bash
+# Simple strategies (default)
 python reasoning_features/scripts/run_token_injection_experiment.py \
     --token-analysis results/layer8/token_analysis.json \
     --reasoning-features results/layer8/reasoning_features.json \
@@ -361,6 +392,24 @@ python reasoning_features/scripts/run_token_injection_experiment.py \
     --reasoning-dataset s1k \
     --top-k-features 10 \
     --n-samples 100 \
+    --save-dir results/layer8
+
+# Contextual strategies (for sequence-sensitive features)
+python reasoning_features/scripts/run_token_injection_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --reasoning-features results/layer8/reasoning_features.json \
+    --layer 8 \
+    --reasoning-dataset s1k \
+    --strategies bigram_before bigram_after trigram comma_list \
+    --n-inject-contextual 2 \
+    --save-dir results/layer8
+
+# Mixed strategies
+python reasoning_features/scripts/run_token_injection_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --reasoning-features results/layer8/reasoning_features.json \
+    --layer 8 \
+    --strategies prepend bigram_before trigram \
     --save-dir results/layer8
 ```
 

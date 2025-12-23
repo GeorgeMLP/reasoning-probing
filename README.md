@@ -235,9 +235,28 @@ python reasoning_features/scripts/run_anova_experiment.py \
 ### Experimental Design
 
 1. Take non-reasoning text samples
-2. Inject feature's top tokens (prepend, intersperse, or replace)
+2. Inject feature's top tokens using various strategies
 3. Measure activation before and after injection
 4. Compare to activation on actual reasoning text
+
+**Injection Strategies:**
+
+*Simple strategies:*
+- `prepend`: Add tokens at the beginning
+- `append`: Add tokens at the end  
+- `intersperse`: Distribute throughout the text
+- `replace`: Replace random words
+
+*Contextual strategies* (for features sensitive to token sequences):
+- `bigram_before`: Inject [context, token] pairs (e.g., "to identify")
+- `bigram_after`: Inject [token, context] pairs (e.g., "need to")
+- `trigram`: Inject [before, token, after] triplets
+- `comma_list`: Inject as comma-separated list
+
+Contextual strategies are crucial for detecting features that activate on token combinations rather than individual tokens, such as:
+- Verbs that only activate after "to"
+- Pronouns that only activate before specific modals
+- Items in enumerated lists
 
 ### Key Metrics
 
@@ -257,13 +276,22 @@ python reasoning_features/scripts/run_anova_experiment.py \
 ### Usage
 
 ```bash
-# Run experiment
+# Run experiment with simple strategies
 python reasoning_features/scripts/run_token_injection_experiment.py \
     --token-analysis results/layer8/token_analysis.json \
     --reasoning-features results/layer8/reasoning_features.json \
     --layer 8 \
     --top-k-features 10 \
     --n-samples 100 \
+    --save-dir results/layer8
+
+# Run with contextual strategies (for context-sensitive features)
+python reasoning_features/scripts/run_token_injection_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --reasoning-features results/layer8/reasoning_features.json \
+    --layer 8 \
+    --strategies bigram_before bigram_after trigram \
+    --n-inject-contextual 2 \
     --save-dir results/layer8
 
 # Visualize token-level activations

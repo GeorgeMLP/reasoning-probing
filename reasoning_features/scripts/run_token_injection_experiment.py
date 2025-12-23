@@ -56,6 +56,54 @@ from scipy import stats
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
+def extract_token_contexts(
+    reasoning_texts: list[str],
+    target_tokens: list[str],
+    context_window: int = 2,
+) -> dict[str, dict[str, list[str]]]:
+    """Extract common contexts (preceding/following tokens) for target tokens.
+    
+    Args:
+        reasoning_texts: List of reasoning text samples
+        target_tokens: List of tokens to find contexts for
+        context_window: Number of tokens before/after to consider
+        
+    Returns:
+        Dict mapping token -> {"before": [common_preceding_tokens], "after": [common_following_tokens]}
+    """
+    from collections import Counter
+    
+    token_contexts = {token: {"before": Counter(), "after": Counter()} for token in target_tokens}
+    
+    for text in reasoning_texts:
+        words = text.split()
+        for i, word in enumerate(words):
+            # Normalize word (strip punctuation for matching)
+            normalized = word.strip('.,!?;:').lower()
+            
+            for target in target_tokens:
+                if target.strip().lower() in normalized:
+                    # Extract preceding tokens
+                    if i > 0:
+                        prev_word = words[i-1].strip('.,!?;:').lower()
+                        token_contexts[target]["before"][prev_word] += 1
+                    
+                    # Extract following tokens
+                    if i < len(words) - 1:
+                        next_word = words[i+1].strip('.,!?;:').lower()
+                        token_contexts[target]["after"][next_word] += 1
+    
+    # Convert Counters to sorted lists (most common first)
+    result = {}
+    for token in target_tokens:
+        result[token] = {
+            "before": [tok for tok, _ in token_contexts[token]["before"].most_common(10)],
+            "after": [tok for tok, _ in token_contexts[token]["after"].most_common(10)],
+        }
+    
+    return result
+
+
 def load_top_tokens_for_feature(
     token_analysis_path: str,
     feature_index: int,
@@ -87,6 +135,7 @@ def inject_tokens_into_text(
     tokens: list[str],
     n_inject: int = 3,
     strategy: str = "prepend",
+    token_contexts: Optional[dict[str, dict[str, list[str]]]] = None,
 ) -> str:
     """Inject tokens into text using various strategies.
     
@@ -94,44 +143,137 @@ def inject_tokens_into_text(
         text: The original text
         tokens: List of tokens to inject
         n_inject: Number of tokens to inject
-        strategy: One of "prepend", "append", "intersperse", "replace"
+        strategy: Injection strategy (see below)
+        token_contexts: Optional dict mapping token -> {"before": [...], "after": [...]}
+                       Required for contextual strategies
+        
+    Simple strategies (use n_inject):
+        - prepend: Add tokens at the beginning
+        - append: Add tokens at the end
+        - intersperse: Spread tokens throughout
+        - replace: Replace random words
+        
+    Contextual strategies (use n_inject):
+        - bigram_before: Inject [context_word, target_token] pairs
+        - bigram_after: Inject [target_token, context_word] pairs
+        - trigram: Inject [before, target_token, after] triplets
+        - comma_list: Inject as comma-separated list
         
     Returns:
         Modified text with tokens injected
     """
     selected_tokens = random.sample(tokens, min(n_inject, len(tokens)))
+    words = text.split()
     
+    # Simple strategies
     if strategy == "prepend":
-        # Add tokens at the beginning
         injection = " ".join(selected_tokens) + " "
         return injection + text
     
     elif strategy == "append":
-        # Add tokens at the end
         injection = " " + " ".join(selected_tokens)
         return text + injection
     
     elif strategy == "intersperse":
-        # Spread tokens throughout the text
-        words = text.split()
         if len(words) < 2:
             return " ".join(selected_tokens) + " " + text
-        
-        # Insert tokens at random positions
         for token in selected_tokens:
             pos = random.randint(0, len(words))
             words.insert(pos, token)
         return " ".join(words)
     
     elif strategy == "replace":
-        # Replace random words with tokens
-        words = text.split()
         if len(words) < len(selected_tokens):
             return " ".join(selected_tokens)
-        
         positions = random.sample(range(len(words)), len(selected_tokens))
         for pos, token in zip(positions, selected_tokens):
             words[pos] = token
+        return " ".join(words)
+    
+    # Contextual strategies (require token_contexts)
+    elif strategy == "bigram_before":
+        if not token_contexts:
+            # Fallback to prepend if no context available
+            return " ".join(selected_tokens) + " " + text
+        
+        # Inject [context_word, target_token] bigrams
+        bigrams = []
+        for token in selected_tokens:
+            context_words = token_contexts.get(token, {}).get("before", [])
+            if context_words:
+                context = random.choice(context_words[:3])  # Pick from top 3
+                bigrams.append(f"{context} {token}")
+            else:
+                bigrams.append(token)
+        
+        if len(words) < 2:
+            return " ".join(bigrams) + " " + text
+        # Intersperse bigrams
+        for bigram in bigrams:
+            pos = random.randint(0, len(words))
+            words.insert(pos, bigram)
+        return " ".join(words)
+    
+    elif strategy == "bigram_after":
+        if not token_contexts:
+            return text + " " + " ".join(selected_tokens)
+        
+        # Inject [target_token, context_word] bigrams
+        bigrams = []
+        for token in selected_tokens:
+            context_words = token_contexts.get(token, {}).get("after", [])
+            if context_words:
+                context = random.choice(context_words[:3])
+                bigrams.append(f"{token} {context}")
+            else:
+                bigrams.append(token)
+        
+        if len(words) < 2:
+            return " ".join(bigrams) + " " + text
+        for bigram in bigrams:
+            pos = random.randint(0, len(words))
+            words.insert(pos, bigram)
+        return " ".join(words)
+    
+    elif strategy == "trigram":
+        if not token_contexts:
+            return " ".join(selected_tokens) + " " + text
+        
+        # Inject [before, target_token, after] trigrams
+        trigrams = []
+        for token in selected_tokens:
+            contexts = token_contexts.get(token, {})
+            before_words = contexts.get("before", [])
+            after_words = contexts.get("after", [])
+            
+            if before_words and after_words:
+                before = random.choice(before_words[:3])
+                after = random.choice(after_words[:3])
+                trigrams.append(f"{before} {token} {after}")
+            elif before_words:
+                before = random.choice(before_words[:3])
+                trigrams.append(f"{before} {token}")
+            elif after_words:
+                after = random.choice(after_words[:3])
+                trigrams.append(f"{token} {after}")
+            else:
+                trigrams.append(token)
+        
+        if len(words) < 2:
+            return " ".join(trigrams) + " " + text
+        for trigram in trigrams:
+            pos = random.randint(0, len(words))
+            words.insert(pos, trigram)
+        return " ".join(words)
+    
+    elif strategy == "comma_list":
+        # Inject as a comma-separated list
+        list_str = ", ".join(selected_tokens)
+        if len(words) < 2:
+            return list_str + " " + text
+        # Insert list at random position
+        pos = random.randint(0, len(words))
+        words.insert(pos, list_str)
         return " ".join(words)
     
     return text
@@ -208,7 +350,9 @@ def run_injection_experiment(
     layer: int,
     device: str,
     n_inject: int = 3,
+    n_inject_contextual: int = 2,
     strategies: Optional[list[str]] = None,
+    token_contexts: Optional[dict[str, dict[str, list[str]]]] = None,
     batch_size: int = 16,
     max_length: int = 128,
 ) -> dict:
@@ -228,8 +372,12 @@ def run_injection_experiment(
         reasoning_texts: Reasoning text samples (target)
         layer: Layer index
         device: Device to run on
-        n_inject: Number of tokens to inject per text
+        n_inject: Number of tokens to inject for simple strategies
+        n_inject_contextual: Number of token sequences to inject for contextual strategies
         strategies: Injection strategies to test
+        token_contexts: Optional context information for contextual strategies
+        batch_size: Batch size for processing
+        max_length: Maximum sequence length
         
     Returns:
         Dictionary containing experiment results and classification
@@ -264,10 +412,16 @@ def run_injection_experiment(
     # Test each injection strategy
     strategy_results = {}
     
+    # Define which strategies are contextual
+    contextual_strategies = {"bigram_before", "bigram_after", "trigram", "comma_list"}
+    
     for strategy in strategies:
+        # Use appropriate n_inject based on strategy type
+        n_to_inject = n_inject_contextual if strategy in contextual_strategies else n_inject
+        
         # Inject tokens
         injected_texts = [
-            inject_tokens_into_text(text, top_tokens, n_inject, strategy)
+            inject_tokens_into_text(text, top_tokens, n_to_inject, strategy, token_contexts)
             for text in nonreasoning_texts
         ]
         
@@ -346,7 +500,15 @@ def main():
     parser.add_argument("--top-k-features", type=int, default=10)
     parser.add_argument("--top-k-tokens", type=int, default=30)
     parser.add_argument("--n-inject", type=int, default=3,
-                        help="Number of tokens to inject per text")
+                        help="Number of tokens to inject for simple strategies (prepend, append, intersperse, replace)")
+    parser.add_argument("--n-inject-contextual", type=int, default=2,
+                        help="Number of token sequences to inject for contextual strategies "
+                             "(bigram_before, bigram_after, trigram, comma_list). "
+                             "Default is smaller since each injection is a multi-token sequence.")
+    parser.add_argument("--strategies", type=str, nargs="+",
+                        default=["prepend", "append", "intersperse", "replace", "bigram_before", "bigram_after", "trigram", "comma_list"],
+                        help="Injection strategies to test. Options: prepend, append, intersperse, "
+                             "replace, bigram_before, bigram_after, trigram, comma_list")
     parser.add_argument("--n-samples", type=int, default=100,
                         help="Number of samples per condition")
     parser.add_argument("--reasoning-dataset", type=str, default="s1k",
@@ -436,6 +598,30 @@ def main():
     print(f"Loaded {len(reasoning_texts)} reasoning texts")
     print(f"Loaded {len(nonreasoning_texts)} non-reasoning texts")
     
+    # Check if contextual strategies are requested
+    contextual_strategies = {"bigram_before", "bigram_after", "trigram", "comma_list"}
+    use_contexts = bool(set(args.strategies) & contextual_strategies)
+    
+    # Extract token contexts if needed
+    print(f"\nStrategies to test: {', '.join(args.strategies)}")
+    if use_contexts:
+        print("Extracting token contexts from reasoning texts...")
+        # We'll extract contexts for all features at once
+        all_feature_tokens = []
+        for feat_idx in feature_indices:
+            tokens = load_top_tokens_for_feature(args.token_analysis, feat_idx, args.top_k_tokens)
+            all_feature_tokens.extend(tokens)
+        all_feature_tokens = list(set(all_feature_tokens))  # Deduplicate
+        
+        global_token_contexts = extract_token_contexts(
+            reasoning_texts[:min(1000, len(reasoning_texts))],  # Use up to 1000 texts for context extraction
+            all_feature_tokens,
+            context_window=2
+        )
+        print(f"  Extracted contexts for {len(global_token_contexts)} unique tokens")
+    else:
+        global_token_contexts = None
+    
     # Run experiment for each feature
     print(f"\n{'='*60}")
     print("RUNNING EXPERIMENTS")
@@ -453,6 +639,15 @@ def main():
             print(f"  Feature {feat_idx}: Not enough tokens, skipping")
             continue
         
+        # Get contexts for this feature's tokens
+        if use_contexts and global_token_contexts:
+            feature_token_contexts = {
+                token: global_token_contexts.get(token, {"before": [], "after": []})
+                for token in top_tokens
+            }
+        else:
+            feature_token_contexts = None
+        
         print(f"\n  Feature {feat_idx}: Testing with {len(top_tokens)} tokens")
         print(f"    Top tokens: {top_tokens[:5]}...")
         
@@ -462,6 +657,9 @@ def main():
             nonreasoning_texts, reasoning_texts,
             args.layer, args.device,
             n_inject=args.n_inject,
+            n_inject_contextual=args.n_inject_contextual,
+            strategies=args.strategies,
+            token_contexts=feature_token_contexts,
             batch_size=args.batch_size,
             max_length=args.max_length,
         )
@@ -499,6 +697,8 @@ def main():
             "top_k_features": args.top_k_features,
             "top_k_tokens": args.top_k_tokens,
             "n_inject": args.n_inject,
+            "n_inject_contextual": args.n_inject_contextual,
+            "strategies": args.strategies,
             "n_samples": args.n_samples,
         },
         "summary": {
