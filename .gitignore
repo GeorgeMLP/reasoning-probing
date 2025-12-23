@@ -6,7 +6,7 @@ wandb/
 data/
 cache/
 plots/
-data_bk/
+visualizations/
 results/
 draft.*
 *.egg-info

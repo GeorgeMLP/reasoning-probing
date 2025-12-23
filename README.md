@@ -257,6 +257,7 @@ python reasoning_features/scripts/run_anova_experiment.py \
 ### Usage
 
 ```bash
+# Run experiment
 python reasoning_features/scripts/run_token_injection_experiment.py \
     --token-analysis results/layer8/token_analysis.json \
     --reasoning-features results/layer8/reasoning_features.json \
@@ -264,7 +265,22 @@ python reasoning_features/scripts/run_token_injection_experiment.py \
     --top-k-features 10 \
     --n-samples 100 \
     --save-dir results/layer8
+
+# Visualize token-level activations
+python reasoning_features/scripts/visualize_injection_features.py \
+    --injection-results results/layer8/injection_results.json \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --n-features 5 \
+    --n-examples 3 \
+    --output-dir visualizations/token_level/layer8
 ```
+
+This creates interactive HTML visualizations showing:
+- **Token-level activations** with color-coded backgrounds (darker = higher activation)
+- **Comparison across conditions**: baseline, reasoning, and injected (all 3 strategies)
+- **Feature metadata**: transfer ratio, classification, best strategy
+- Multiple example texts per condition
 
 ### Interpretation
 
