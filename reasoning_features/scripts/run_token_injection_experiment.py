@@ -145,7 +145,7 @@ def get_feature_activation(
     layer: int,
     feature_index: int,
     device: str,
-    batch_size: int = 32,
+    batch_size: int = 16,
     max_length: int = 128,
 ) -> Float[np.ndarray, "n_texts"]:
     """Get max feature activations for a batch of texts.
@@ -209,6 +209,8 @@ def run_injection_experiment(
     device: str,
     n_inject: int = 3,
     strategies: Optional[list[str]] = None,
+    batch_size: int = 16,
+    max_length: int = 128,
 ) -> dict:
     """Run token injection experiment for a single feature.
     
@@ -243,7 +245,8 @@ def run_injection_experiment(
     
     # Baseline: activation on original non-reasoning text
     baseline_acts = get_feature_activation(
-        model, sae, tokenizer, nonreasoning_texts, layer, feature_index, device
+        model, sae, tokenizer, nonreasoning_texts, layer, feature_index, device,
+        batch_size=batch_size, max_length=max_length
     )
     results["baseline_mean"] = float(np.mean(baseline_acts))
     results["baseline_std"] = float(np.std(baseline_acts))
@@ -251,7 +254,8 @@ def run_injection_experiment(
     
     # Target: activation on reasoning text
     reasoning_acts = get_feature_activation(
-        model, sae, tokenizer, reasoning_texts, layer, feature_index, device
+        model, sae, tokenizer, reasoning_texts, layer, feature_index, device,
+        batch_size=batch_size, max_length=max_length
     )
     results["reasoning_mean"] = float(np.mean(reasoning_acts))
     results["reasoning_std"] = float(np.std(reasoning_acts))
@@ -269,7 +273,8 @@ def run_injection_experiment(
         
         # Measure activation after injection
         injected_acts = get_feature_activation(
-            model, sae, tokenizer, injected_texts, layer, feature_index, device
+            model, sae, tokenizer, injected_texts, layer, feature_index, device,
+            batch_size=batch_size, max_length=max_length
         )
         
         # Compute metrics
@@ -352,6 +357,10 @@ def main():
     parser.add_argument("--sae-id-format", type=str, default="layer_{layer}/width_16k/canonical")
     parser.add_argument("--save-dir", type=str, required=True)
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--batch-size", type=int, default=16,
+                        help="Batch size for processing texts")
+    parser.add_argument("--max-length", type=int, default=128,
+                        help="Maximum sequence length for tokenization")
     args = parser.parse_args()
     
     print(f"\n{'='*60}")
@@ -453,6 +462,8 @@ def main():
             nonreasoning_texts, reasoning_texts,
             args.layer, args.device,
             n_inject=args.n_inject,
+            batch_size=args.batch_size,
+            max_length=args.max_length,
         )
         
         all_results.append(result)

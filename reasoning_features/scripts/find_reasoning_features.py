@@ -158,6 +158,32 @@ def parse_args():
         help="Minimum token occurrences for analysis (default: 5)",
     )
     
+    # Reasoning score weights
+    parser.add_argument(
+        "--score-weight-auc",
+        type=float,
+        default=0.3,
+        help="Weight for AUC contribution in reasoning score (default: 0.3)",
+    )
+    parser.add_argument(
+        "--score-weight-effect",
+        type=float,
+        default=0.25,
+        help="Weight for effect size contribution in reasoning score (default: 0.25)",
+    )
+    parser.add_argument(
+        "--score-weight-pvalue",
+        type=float,
+        default=0.25,
+        help="Weight for p-value contribution in reasoning score (default: 0.25)",
+    )
+    parser.add_argument(
+        "--score-weight-freq",
+        type=float,
+        default=0.2,
+        help="Weight for frequency contribution in reasoning score (default: 0.2)",
+    )
+    
     # Output
     parser.add_argument(
         "--save-dir",
@@ -259,7 +285,17 @@ def main():
     
     # Detect reasoning features
     print("\n--- Detecting Reasoning Features ---")
-    detector = ReasoningFeatureDetector(activations, aggregation="max")
+    score_weights = {
+        "auc": args.score_weight_auc,
+        "effect": args.score_weight_effect,
+        "pvalue": args.score_weight_pvalue,
+        "freq": args.score_weight_freq,
+    }
+    detector = ReasoningFeatureDetector(
+        activations, 
+        aggregation="max",
+        score_weights=score_weights
+    )
     
     # Get all feature statistics
     all_stats = detector.compute_all_stats(verbose=True)

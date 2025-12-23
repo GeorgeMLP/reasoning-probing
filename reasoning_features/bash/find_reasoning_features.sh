@@ -7,6 +7,10 @@ for layer in 0 4 8 12 16 20 24; do
         --max-length 64 \
         --top-k-features 100 \
         --top-k-tokens 30 \
+        --score-weight-auc 0.3 \
+        --score-weight-effect 0.25 \
+        --score-weight-pvalue 0.25 \
+        --score-weight-freq 0.2 \
         --save-dir results/initial-setting/gemma-2-9b/s1k/layer$layer \
         --batch-size 16
 done
@@ -20,6 +24,10 @@ for layer in 0 4 8 12 16 20 24; do
         --max-length 64 \
         --top-k-features 100 \
         --top-k-tokens 30 \
+        --score-weight-auc 0.3 \
+        --score-weight-effect 0.25 \
+        --score-weight-pvalue 0.25 \
+        --score-weight-freq 0.2 \
         --save-dir results/initial-setting/gemma-2-9b/general_inquiry_cot/layer$layer \
         --batch-size 16
 done

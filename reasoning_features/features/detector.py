@@ -51,8 +51,20 @@ class FeatureStats:
     # Composite score (higher = more reasoning-correlated)
     reasoning_score: float = field(default=0.0)
     
+    # Score weights (can be customized)
+    _score_weights: dict = field(default_factory=lambda: {
+        "auc": 0.3,
+        "effect": 0.25,
+        "pvalue": 0.25,
+        "freq": 0.2,
+    }, repr=False)
+    
     def __post_init__(self):
         """Compute composite reasoning score."""
+        self._compute_reasoning_score()
+    
+    def _compute_reasoning_score(self):
+        """Compute composite reasoning score with configurable weights."""
         # Combine multiple metrics into a single score
         # Prioritize: high AUC, large effect size, low p-value, high activation in reasoning
         
@@ -73,12 +85,29 @@ class FeatureStats:
         freq_contrib = min(np.log2(freq_ratio + 1) / 5, 1.0) if freq_ratio > 1 else 0
         
         # Weighted combination
+        weights = self._score_weights
         self.reasoning_score = direction * (
-            0.3 * auc_contrib +
-            0.25 * effect_contrib +
-            0.25 * p_contrib +
-            0.2 * freq_contrib
+            weights["auc"] * auc_contrib +
+            weights["effect"] * effect_contrib +
+            weights["pvalue"] * p_contrib +
+            weights["freq"] * freq_contrib
         )
+    
+    def set_score_weights(
+        self,
+        auc_weight: float = 0.3,
+        effect_weight: float = 0.25,
+        pvalue_weight: float = 0.25,
+        freq_weight: float = 0.2,
+    ):
+        """Update score weights and recompute reasoning score."""
+        self._score_weights = {
+            "auc": auc_weight,
+            "effect": effect_weight,
+            "pvalue": pvalue_weight,
+            "freq": freq_weight,
+        }
+        self._compute_reasoning_score()
     
     def is_reasoning_feature(
         self,
@@ -147,6 +176,7 @@ class ReasoningFeatureDetector:
         self,
         activations: FeatureActivations,
         aggregation: str = "max",
+        score_weights: Optional[dict] = None,
     ):
         """
         Args:
@@ -155,9 +185,17 @@ class ReasoningFeatureDetector:
                 - "max": Maximum activation per sample (default)
                 - "mean": Mean activation per sample
                 - "sum": Sum of activations per sample
+            score_weights: Optional dict with keys "auc", "effect", "pvalue", "freq"
+                for customizing reasoning score weights
         """
         self.activations = activations
         self.aggregation = aggregation
+        self.score_weights = score_weights or {
+            "auc": 0.3,
+            "effect": 0.25,
+            "pvalue": 0.25,
+            "freq": 0.2,
+        }
         
         # Get aggregated activations
         if aggregation == "max":
@@ -231,7 +269,7 @@ class ReasoningFeatureDetector:
         freq_r = (reasoning_acts > threshold).mean()
         freq_nr = (nonreasoning_acts > threshold).mean()
         
-        return FeatureStats(
+        stats = FeatureStats(
             feature_index=feature_idx,
             mean_reasoning=mean_r,
             mean_nonreasoning=mean_nr,
@@ -246,7 +284,9 @@ class ReasoningFeatureDetector:
             roc_auc=roc_auc,
             freq_active_reasoning=float(freq_r),
             freq_active_nonreasoning=float(freq_nr),
+            _score_weights=self.score_weights,
         )
+        return stats
     
     def compute_all_stats(self, verbose: bool = True) -> list[FeatureStats]:
         """Compute statistics for all features."""

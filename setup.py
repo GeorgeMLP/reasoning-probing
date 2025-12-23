@@ -23,6 +23,7 @@ setup(
         "wandb",
         "sae_lens",
         "transformer_lens",
+        "sae-dashboard",
         "sentence_transformers",
         "info-nce-pytorch",
         "pdbpp",
