@@ -71,37 +71,153 @@ def load_top_tokens_for_feature(token_analysis_path: Path, feature_index: int, t
     return []
 
 
-def inject_tokens_into_text(text: str, tokens: list[str], n_inject: int, strategy: str, seed: Optional[int] = None) -> tuple[str, set[str]]:
+def inject_tokens_into_text(text: str, tokens: list[str], n_inject: int, strategy: str, seed: Optional[int] = None) -> tuple[str, list[tuple[int, int]]]:
     """Inject tokens into text using specified strategy.
     
     Returns:
-        tuple: (injected_text, set of injected token strings)
+        tuple: (injected_text, list of (start_char, end_char) positions of injected tokens)
     """
     if seed is not None:
         random.seed(seed)
     
     selected_tokens = random.sample(tokens, min(n_inject, len(tokens)))
-    injected_set = set(selected_tokens)
+    injected_positions = []
     
     if strategy == "prepend":
-        return " ".join(selected_tokens) + " " + text, injected_set
+        # Prepend tokens at the beginning
+        # Build prefix and track exact token positions
+        prefix = ""
+        for token in selected_tokens:
+            token_start = len(prefix)
+            prefix += token
+            token_end = len(prefix)
+            injected_positions.append((token_start, token_end))
+        
+        # Add space before original text if needed
+        if prefix and not prefix.endswith(' '):
+            prefix += ' '
+        
+        return prefix + text, injected_positions
+    
     elif strategy == "intersperse":
         words = text.split()
         if len(words) < 2:
-            return " ".join(selected_tokens) + " " + text, injected_set
-        for token in selected_tokens:
-            pos = random.randint(0, len(words))
-            words.insert(pos, token)
-        return " ".join(words), injected_set
+            # Same as prepend for short text
+            prefix = ""
+            for token in selected_tokens:
+                token_start = len(prefix)
+                prefix += token
+                token_end = len(prefix)
+                injected_positions.append((token_start, token_end))
+            if prefix and not prefix.endswith(' '):
+                prefix += ' '
+            return prefix + text, injected_positions
+        
+        # Insert tokens at random positions and track their positions
+        # Use markers to track injection sites
+        insert_positions = sorted([random.randint(0, len(words)) for _ in selected_tokens])
+        for i, (token, pos) in enumerate(zip(selected_tokens, insert_positions)):
+            # Adjust position for previously inserted tokens
+            adjusted_pos = pos + i
+            # Insert the token itself, not with extra formatting
+            words.insert(adjusted_pos, f"[INJ_START]{token}[INJ_END]")
+        
+        # Smart join: don't add space before items that already start with space or markers
+        result_parts = []
+        for i, word in enumerate(words):
+            if i > 0 and not word.startswith(' ') and not word.startswith('[INJ_START]'):
+                result_parts.append(' ')
+            result_parts.append(word)
+        result = "".join(result_parts)
+        
+        # Find positions of injected markers and extract the actual token text
+        marker_start_len = len("[INJ_START]")
+        marker_end_len = len("[INJ_END]")
+        temp_positions = []
+        pos = 0
+        while True:
+            start_marker = result.find("[INJ_START]", pos)
+            if start_marker == -1:
+                break
+            end_marker = result.find("[INJ_END]", start_marker)
+            # The actual token text is between start_marker+marker_start_len and end_marker
+            token_start_with_markers = start_marker
+            token_end_with_markers = end_marker + marker_end_len
+            temp_positions.append((token_start_with_markers, token_end_with_markers))
+            pos = token_end_with_markers
+        
+        # Remove markers from result
+        result = result.replace("[INJ_START]", "").replace("[INJ_END]", "")
+        
+        # Adjust positions after marker removal
+        # For each injection point, we removed marker_start_len + marker_end_len characters
+        marker_total_len = marker_start_len + marker_end_len
+        for i, (start_with_markers, end_with_markers) in enumerate(temp_positions):
+            # Adjust for markers removed before this position
+            offset = i * marker_total_len
+            adjusted_start = start_with_markers - offset
+            # The actual token length (without markers)
+            token_len = end_with_markers - start_with_markers - marker_total_len
+            adjusted_end = adjusted_start + token_len
+            injected_positions.append((adjusted_start, adjusted_end))
+        
+        return result, injected_positions
+    
     elif strategy == "replace":
         words = text.split()
         if len(words) < len(selected_tokens):
-            return " ".join(selected_tokens), injected_set
-        positions = random.sample(range(len(words)), len(selected_tokens))
+            result = " ".join(selected_tokens)
+            pos = 0
+            for token in selected_tokens:
+                injected_positions.append((pos, pos + len(token)))
+                pos += len(token) + 1
+            return result, injected_positions
+        
+        # Mark positions to replace
+        positions = sorted(random.sample(range(len(words)), len(selected_tokens)))
         for pos, token in zip(positions, selected_tokens):
-            words[pos] = token
-        return " ".join(words), injected_set
-    return text, injected_set
+            words[pos] = f"[INJ_START]{token}[INJ_END]"
+        
+        # Smart join: don't add space before items that already start with space or markers
+        result_parts = []
+        for i, word in enumerate(words):
+            if i > 0 and not word.startswith(' ') and not word.startswith('[INJ_START]'):
+                result_parts.append(' ')
+            result_parts.append(word)
+        result = "".join(result_parts)
+        
+        # Find positions of injected markers
+        marker_start_len = len("[INJ_START]")
+        marker_end_len = len("[INJ_END]")
+        temp_positions = []
+        pos = 0
+        while True:
+            start_marker = result.find("[INJ_START]", pos)
+            if start_marker == -1:
+                break
+            end_marker = result.find("[INJ_END]", start_marker)
+            token_start_with_markers = start_marker
+            token_end_with_markers = end_marker + marker_end_len
+            temp_positions.append((token_start_with_markers, token_end_with_markers))
+            pos = token_end_with_markers
+        
+        # Remove markers
+        result = result.replace("[INJ_START]", "").replace("[INJ_END]", "")
+        
+        # Adjust positions after marker removal
+        marker_total_len = marker_start_len + marker_end_len
+        for i, (start_with_markers, end_with_markers) in enumerate(temp_positions):
+            # Adjust for markers removed before this position
+            offset = i * marker_total_len
+            adjusted_start = start_with_markers - offset
+            # The actual token length (without markers)
+            token_len = end_with_markers - start_with_markers - marker_total_len
+            adjusted_end = adjusted_start + token_len
+            injected_positions.append((adjusted_start, adjusted_end))
+        
+        return result, injected_positions
+    
+    return text, injected_positions
 
 
 def get_token_activations(
@@ -112,15 +228,21 @@ def get_token_activations(
     layer: int,
     feature_index: int,
     device: str,
-) -> tuple[list[str], Float[np.ndarray, "seq"]]:
+    injected_char_positions: Optional[list[tuple[int, int]]] = None,
+) -> tuple[list[str], Float[np.ndarray, "seq"], list[bool]]:
     """Get token-level activations for a single text.
     
-    Returns token strings (with spaces preserved) and activations, filtering special tokens.
+    Args:
+        injected_char_positions: List of (start, end) character positions of injected text
+    
+    Returns:
+        tuple: (token_strings, activations, is_injected_flags)
     """
     hook_name = f"blocks.{layer}.hook_resid_post"
     
-    tokens = tokenizer(text, return_tensors="pt", truncation=True, max_length=128)
+    tokens = tokenizer(text, return_tensors="pt", truncation=True, max_length=128, return_offsets_mapping=True)
     input_ids: Int[torch.Tensor, "1 seq"] = tokens["input_ids"].to(device)
+    offset_mapping = tokens["offset_mapping"][0]  # Character spans for each token
     
     with torch.no_grad():
         _, cache = model.run_with_cache(input_ids, stop_at_layer=layer + 1)
@@ -132,6 +254,7 @@ def get_token_activations(
     token_ids = input_ids[0].cpu().tolist()
     token_strs = []
     kept_indices = []
+    is_injected = []
     
     for i, tid in enumerate(token_ids):
         # Decode token (keeps spaces automatically)
@@ -147,14 +270,25 @@ def get_token_activations(
         
         # Replace newlines with spaces to prevent random line breaks in HTML
         token_str = token_str.replace('\n', ' ').replace('\r', ' ')
+        
+        # Check if this token overlaps with any injected character positions
+        token_is_injected = False
+        if injected_char_positions:
+            token_start, token_end = offset_mapping[i].tolist()
+            for inj_start, inj_end in injected_char_positions:
+                # Check for overlap
+                if not (token_end <= inj_start or token_start >= inj_end):
+                    token_is_injected = True
+                    break
             
         token_strs.append(token_str)
         kept_indices.append(i)
+        is_injected.append(token_is_injected)
     
     # Filter activations to match kept tokens
     filtered_activations = activations[kept_indices] if kept_indices else activations[:0]
     
-    return token_strs, filtered_activations
+    return token_strs, filtered_activations, is_injected
 
 
 def generate_html_for_feature(
@@ -437,12 +571,12 @@ def generate_html_for_feature(
 """
         
         for i, example_data in enumerate(examples[condition_key]):
-            # Unpack example data (tokens, activations, optional injected_set)
+            # Unpack example data (tokens, activations, is_injected_flags)
             if len(example_data) == 3:
-                tokens, activations, injected_set = example_data
+                tokens, activations, is_injected_flags = example_data
             else:
                 tokens, activations = example_data
-                injected_set = set()
+                is_injected_flags = [False] * len(tokens)
             
             # Get activation range for normalization
             max_act = max(max(activations), 0.001) if len(activations) > 0 else 0.001
@@ -453,7 +587,7 @@ def generate_html_for_feature(
             <div class="text-container">
 """
             
-            for token, act in zip(tokens, activations):
+            for token, act, is_injected in zip(tokens, activations, is_injected_flags):
                 # Normalize activation for color
                 norm_act = min(act / max_act, 1.0)
                 
@@ -467,10 +601,7 @@ def generate_html_for_feature(
                 else:
                     bg_color = f"rgba(255, 0, 0, {0.5 + norm_act * 0.4})"
                 
-                # Check if this token was injected
-                # Normalize both sides: strip spaces and lowercase for matching
-                token_normalized = token.strip().lower()
-                is_injected = any(token_normalized == inj_tok.strip().lower() for inj_tok in injected_set)
+                # Use the is_injected flag directly
                 injected_class = " token-injected" if is_injected else ""
                 
                 # Escape HTML (keep original spacing for display)
@@ -623,28 +754,40 @@ def main():
         
         # Get baseline activations (no injected tokens)
         for text in sample_nonreasoning:
-            tokens, acts = get_token_activations(text, model, sae, tokenizer, args.layer, feat_idx, args.device)
+            tokens, acts, is_injected = get_token_activations(
+                text, model, sae, tokenizer, args.layer, feat_idx, args.device, injected_char_positions=None
+            )
             # Truncate to max_seq_len
             tokens = tokens[:args.max_seq_len]
             acts = acts[:args.max_seq_len]
-            examples["baseline"].append((tokens, acts, set()))
+            is_injected = is_injected[:args.max_seq_len]
+            examples["baseline"].append((tokens, acts, is_injected))
         
         # Get reasoning activations (no injected tokens)
         for text in sample_reasoning:
-            tokens, acts = get_token_activations(text, model, sae, tokenizer, args.layer, feat_idx, args.device)
+            tokens, acts, is_injected = get_token_activations(
+                text, model, sae, tokenizer, args.layer, feat_idx, args.device, injected_char_positions=None
+            )
             tokens = tokens[:args.max_seq_len]
             acts = acts[:args.max_seq_len]
-            examples["reasoning"].append((tokens, acts, set()))
+            is_injected = is_injected[:args.max_seq_len]
+            examples["reasoning"].append((tokens, acts, is_injected))
         
         # Get injected activations for each strategy
         for strategy in ["prepend", "intersperse", "replace"]:
             for idx, text in enumerate(sample_nonreasoning):
                 # Use idx as seed for reproducibility
-                injected_text, injected_set = inject_tokens_into_text(text, top_tokens, n_inject=3, strategy=strategy, seed=feat_idx * 1000 + idx)
-                tokens, acts = get_token_activations(injected_text, model, sae, tokenizer, args.layer, feat_idx, args.device)
+                injected_text, injected_char_positions = inject_tokens_into_text(
+                    text, top_tokens, n_inject=3, strategy=strategy, seed=feat_idx * 1000 + idx
+                )
+                tokens, acts, is_injected = get_token_activations(
+                    injected_text, model, sae, tokenizer, args.layer, feat_idx, args.device,
+                    injected_char_positions=injected_char_positions
+                )
                 tokens = tokens[:args.max_seq_len]
                 acts = acts[:args.max_seq_len]
-                examples[strategy].append((tokens, acts, injected_set))
+                is_injected = is_injected[:args.max_seq_len]
+                examples[strategy].append((tokens, acts, is_injected))
         
         # Generate HTML
         output_path = args.output_dir / f"feature_{feat_idx}.html"
