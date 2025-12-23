@@ -71,6 +71,17 @@ def load_top_tokens_for_feature(token_analysis_path: Path, feature_index: int, t
     return []
 
 
+def load_top_tokens_with_activations(token_analysis_path: Path, feature_index: int, top_k: int = 20) -> list[dict]:
+    """Load top-k tokens with full data (token_str and mean_activation) for a feature."""
+    with open(token_analysis_path) as f:
+        data = json.load(f)
+    
+    for feature in data.get("features", []):
+        if feature.get("feature_index") == feature_index:
+            return feature.get("top_tokens", [])[:top_k]
+    return []
+
+
 def inject_tokens_into_text(text: str, tokens: list[str], n_inject: int, strategy: str, seed: Optional[int] = None) -> tuple[str, list[tuple[int, int]]]:
     """Inject tokens into text using specified strategy.
     
@@ -295,12 +306,14 @@ def generate_html_for_feature(
     feature_data: dict,
     examples: dict,
     output_path: Path,
+    top_tokens: Optional[list[dict]] = None,
 ):
     """Generate HTML visualization for a single feature.
     
     Args:
         examples: Dict with keys like 'baseline', 'reasoning', 'prepend', etc.
                   Each value is a list of tuples: (tokens, activations, injected_tokens_set)
+        top_tokens: List of dicts with 'token_str' and 'mean_activation' keys
     """
     
     feat_idx = feature_data["feature_index"]
@@ -552,6 +565,34 @@ def generate_html_for_feature(
     </div>
 """
     
+    # Add top tokens section if provided
+    if top_tokens:
+        html += """
+    <div class="section">
+        <div class="section-title">🔝 Top Activating Tokens</div>
+        <div style="font-size: 14px; color: #666; margin-bottom: 15px;">
+            These tokens produce the strongest activation for this feature in the reasoning dataset.
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">
+"""
+        for i, tok_data in enumerate(top_tokens[:20]):  # Show top 20
+            token_str = tok_data['token_str'].replace('<', '&lt;').replace('>', '&gt;')
+            mean_act = tok_data['mean_activation']
+            html += f"""
+            <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; border-left: 3px solid #667eea;">
+                <div style="font-family: 'Courier New', monospace; font-weight: bold; margin-bottom: 5px;">
+                    "{token_str}"
+                </div>
+                <div style="font-size: 12px; color: #666;">
+                    Activation: {mean_act:.2f}
+                </div>
+            </div>
+"""
+        html += """
+        </div>
+    </div>
+"""
+    
     # Add examples for each condition
     conditions = [
         ("baseline", "🔵 Baseline (Non-Reasoning)", "#3498db"),
@@ -734,11 +775,14 @@ def main():
         feat_idx = feature_data["feature_index"]
         print(f"\nProcessing feature {feat_idx}...")
         
-        # Load top tokens for injection
+        # Load top tokens for injection (strings only)
         top_tokens = load_top_tokens_for_feature(args.token_analysis, feat_idx, top_k=10)
         if len(top_tokens) < 3:
             print(f"  Not enough tokens for feature {feat_idx}, skipping")
             continue
+        
+        # Load top tokens with full data for display
+        top_tokens_with_data = load_top_tokens_with_activations(args.token_analysis, feat_idx, top_k=20)
         
         # Sample texts for this feature
         sample_nonreasoning = random.sample(nonreasoning_texts, min(args.n_examples, len(nonreasoning_texts)))
@@ -791,7 +835,7 @@ def main():
         
         # Generate HTML
         output_path = args.output_dir / f"feature_{feat_idx}.html"
-        generate_html_for_feature(feature_data, examples, output_path)
+        generate_html_for_feature(feature_data, examples, output_path, top_tokens=top_tokens_with_data)
     
     # Generate index page
     index_html = f"""<!DOCTYPE html>
