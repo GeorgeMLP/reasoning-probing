@@ -11,7 +11,7 @@ for layer in 0 4 8 12 16 20 24; do
         --score-weight-effect 0.25 \
         --score-weight-pvalue 0.25 \
         --score-weight-freq 0.2 \
-        --save-dir results/initial-setting/gemma-2-9b/s1k/layer$layer \
+        --save-dir results/64maxlen/gemma-2-9b/s1k/layer$layer \
         --batch-size 16
 done
 
@@ -28,6 +28,6 @@ for layer in 0 4 8 12 16 20 24; do
         --score-weight-effect 0.25 \
         --score-weight-pvalue 0.25 \
         --score-weight-freq 0.2 \
-        --save-dir results/initial-setting/gemma-2-9b/general_inquiry_cot/layer$layer \
+        --save-dir results/64maxlen/gemma-2-9b/general_inquiry_cot/layer$layer \
         --batch-size 16
 done
