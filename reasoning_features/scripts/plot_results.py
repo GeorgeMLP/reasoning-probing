@@ -1144,13 +1144,32 @@ def plot_injection_per_feature(data: dict, output_dir: Path):
         if not features:
             continue
         
-        # Transfer ratios by strategy
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        # Transfer ratios by strategy - get strategies from config
+        config = inj_data.get('config', {})
+        strategies = config.get('strategies', ['prepend', 'intersperse', 'replace'])
         
-        strategies = ['prepend', 'intersperse', 'replace']
-        colors = ['#C44E52', '#DD8452', '#4C72B0']
+        # Color palette for all strategies
+        strategy_colors = {
+            'prepend': '#C44E52', 'append': '#DD8452', 'intersperse': '#4C72B0',
+            'replace': '#55A868', 'bigram_before': '#8172B3', 'bigram_after': '#CCB974',
+            'trigram': '#64B5CD', 'comma_list': '#DA8BC3', 'active_trigram': '#8C8C8C',
+        }
         
-        for ax, strategy, color in zip(axes, strategies, colors):
+        # Create subplot grid based on number of strategies
+        n_strategies = len(strategies)
+        n_cols = min(3, n_strategies)
+        n_rows = (n_strategies + n_cols - 1) // n_cols
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 5*n_rows))
+        if n_rows == 1 and n_cols == 1:
+            axes = np.array([axes])
+        axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
+        
+        for ax_idx, strategy in enumerate(strategies):
+            if ax_idx >= len(axes):
+                break
+            ax = axes[ax_idx]
+            color = strategy_colors.get(strategy, '#808080')
+            
             transfer_ratios = []
             feature_indices = []
             
@@ -1166,8 +1185,12 @@ def plot_injection_per_feature(data: dict, output_dir: Path):
             ax.set_xticklabels([str(idx) for idx in feature_indices], rotation=45, fontsize=8)
             ax.set_xlabel('Feature Index')
             ax.set_ylabel('Transfer Ratio')
-            ax.set_title(f'Strategy: {strategy.capitalize()}')
+            ax.set_title(f'Strategy: {strategy}')
             ax.legend(fontsize=7)
+        
+        # Hide unused subplots
+        for ax_idx in range(len(strategies), len(axes)):
+            axes[ax_idx].set_visible(False)
         
         plt.suptitle(f'Layer {layer}: Transfer Ratios by Injection Strategy', fontsize=14)
         plt.tight_layout()
@@ -1237,8 +1260,15 @@ def plot_injection_activation_comparison(data: dict, output_dir: Path):
         
         baseline_means = [f.get('baseline_mean', 0) for f in features]
         reasoning_means = [f.get('reasoning_mean', 0) for f in features]
-        # Use prepend strategy as the main injected result
-        injected_means = [f.get('strategies', {}).get('prepend', {}).get('injected_mean', 0) for f in features]
+        # Use the best strategy (highest transfer ratio) for injected result
+        injected_means = []
+        for f in features:
+            strategies = f.get('strategies', {})
+            best_mean = 0
+            for strat_data in strategies.values():
+                if strat_data.get('injected_mean', 0) > best_mean:
+                    best_mean = strat_data.get('injected_mean', 0)
+            injected_means.append(best_mean if best_mean > 0 else f.get('strategies', {}).get('prepend', {}).get('injected_mean', 0))
         feature_indices = [f.get('feature_index', 0) for f in features]
         
         ax.bar(x - width, baseline_means, width, label='Non-reasoning (baseline)', color='#4C72B0', alpha=0.8)

@@ -104,6 +104,94 @@ def extract_token_contexts(
     return result
 
 
+def extract_active_trigram_sequences(
+    model,
+    sae,
+    tokenizer,
+    reasoning_texts: list[str],
+    feature_index: int,
+    layer: int,
+    device: str,
+    activation_threshold: float = 0.1,
+    max_sequences: int = 50,
+    max_length: int = 128,
+) -> list[list[str]]:
+    """Extract consecutive 3-token sequences where all tokens activate the feature.
+    
+    This finds natural trigrams from reasoning texts where all three consecutive
+    tokens have feature activation above the threshold (as percentage of max activation).
+    
+    Args:
+        model: The transformer model
+        sae: The sparse autoencoder
+        tokenizer: The tokenizer
+        reasoning_texts: List of reasoning text samples
+        feature_index: Index of the feature to check
+        layer: Layer index
+        device: Device to run on
+        activation_threshold: Threshold as percentage of max activation (0.0 to 1.0)
+        max_sequences: Maximum number of sequences to return
+        max_length: Maximum sequence length for tokenization
+        
+    Returns:
+        List of [token1, token2, token3] sequences as strings
+    """
+    sequences = []
+    
+    # Process texts in small batches to find active trigrams
+    for text in reasoning_texts:
+        if len(sequences) >= max_sequences:
+            break
+            
+        # Tokenize
+        inputs = tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_length,
+            padding=False,
+        ).to(device)
+        
+        token_ids = inputs["input_ids"][0].tolist()
+        if len(token_ids) < 4:  # Need at least 3 tokens + BOS
+            continue
+        
+        # Get activations
+        with torch.no_grad():
+            _, cache = model.run_with_cache(
+                inputs["input_ids"],
+                names_filter=[f"blocks.{layer}.hook_resid_post"],
+            )
+            hidden = cache[f"blocks.{layer}.hook_resid_post"]
+            sae_acts = sae.encode(hidden)
+            feature_acts = sae_acts[0, :, feature_index].cpu().numpy()
+        
+        # Compute threshold based on max activation in this text
+        max_act = feature_acts.max()
+        if max_act <= 0:
+            continue
+        threshold = max_act * activation_threshold
+        
+        # Find consecutive trigrams where all tokens are active
+        for i in range(1, len(token_ids) - 2):  # Skip BOS, leave room for trigram
+            if (feature_acts[i] >= threshold and 
+                feature_acts[i+1] >= threshold and 
+                feature_acts[i+2] >= threshold):
+                # Decode each token
+                t1 = tokenizer.decode([token_ids[i]])
+                t2 = tokenizer.decode([token_ids[i+1]])
+                t3 = tokenizer.decode([token_ids[i+2]])
+                
+                # Skip if any token is empty or just whitespace
+                if t1.strip() and t2.strip() and t3.strip():
+                    sequences.append([t1, t2, t3])
+                    
+                    if len(sequences) >= max_sequences:
+                        break
+    
+    return sequences[:max_sequences]
+
+
 def load_top_tokens_for_feature(
     token_analysis_path: str,
     feature_index: int,
@@ -276,6 +364,44 @@ def inject_tokens_into_text(
         words.insert(pos, list_str)
         return " ".join(words)
     
+    elif strategy == "active_trigram":
+        # Inject consecutive token sequences from reasoning texts that all activate the feature
+        # token_contexts should contain "active_sequences" key with list of [tok1, tok2, tok3] sequences
+        if not token_contexts or "active_sequences" not in token_contexts:
+            # Fallback: just use three consecutive selected tokens
+            if len(selected_tokens) >= 3:
+                trigram_str = " ".join(selected_tokens[:3])
+            else:
+                trigram_str = " ".join(selected_tokens)
+            if len(words) < 2:
+                return trigram_str + " " + text
+            pos = random.randint(0, len(words))
+            words.insert(pos, trigram_str)
+            return " ".join(words)
+        
+        # Use pre-extracted active sequences
+        sequences = token_contexts["active_sequences"]
+        if not sequences:
+            # Fallback
+            trigram_str = " ".join(selected_tokens[:min(3, len(selected_tokens))])
+            if len(words) < 2:
+                return trigram_str + " " + text
+            pos = random.randint(0, len(words))
+            words.insert(pos, trigram_str)
+            return " ".join(words)
+        
+        # Select n_inject sequences
+        selected_seqs = random.sample(sequences, min(n_inject, len(sequences)))
+        
+        for seq in selected_seqs:
+            seq_str = " ".join(seq)
+            if len(words) < 2:
+                words = [seq_str] + words
+            else:
+                pos = random.randint(0, len(words))
+                words.insert(pos, seq_str)
+        return " ".join(words)
+    
     return text
 
 
@@ -350,7 +476,8 @@ def run_injection_experiment(
     layer: int,
     device: str,
     n_inject: int = 3,
-    n_inject_contextual: int = 2,
+    n_inject_bigram: int = 2,
+    n_inject_trigram: int = 1,
     strategies: Optional[list[str]] = None,
     token_contexts: Optional[dict[str, dict[str, list[str]]]] = None,
     batch_size: int = 16,
@@ -373,7 +500,8 @@ def run_injection_experiment(
         layer: Layer index
         device: Device to run on
         n_inject: Number of tokens to inject for simple strategies
-        n_inject_contextual: Number of token sequences to inject for contextual strategies
+        n_inject_bigram: Number of bigram sequences to inject
+        n_inject_trigram: Number of trigram sequences to inject
         strategies: Injection strategies to test
         token_contexts: Optional context information for contextual strategies
         batch_size: Batch size for processing
@@ -412,12 +540,23 @@ def run_injection_experiment(
     # Test each injection strategy
     strategy_results = {}
     
-    # Define which strategies are contextual
-    contextual_strategies = {"bigram_before", "bigram_after", "trigram", "comma_list"}
+    # Define strategy categories
+    simple_strategies = {"prepend", "append", "intersperse", "replace"}
+    bigram_strategies = {"bigram_before", "bigram_after"}
+    trigram_strategies = {"trigram", "active_trigram"}
+    # comma_list uses n_inject since a list needs multiple items
+    
+    def get_n_inject_for_strategy(strat: str) -> int:
+        if strat in simple_strategies or strat == "comma_list":
+            return n_inject
+        elif strat in bigram_strategies:
+            return n_inject_bigram
+        else:  # trigram, active_trigram
+            return n_inject_trigram
     
     for strategy in strategies:
         # Use appropriate n_inject based on strategy type
-        n_to_inject = n_inject_contextual if strategy in contextual_strategies else n_inject
+        n_to_inject = get_n_inject_for_strategy(strategy)
         
         # Inject tokens
         injected_texts = [
@@ -500,15 +639,21 @@ def main():
     parser.add_argument("--top-k-features", type=int, default=10)
     parser.add_argument("--top-k-tokens", type=int, default=30)
     parser.add_argument("--n-inject", type=int, default=3,
-                        help="Number of tokens to inject for simple strategies (prepend, append, intersperse, replace)")
-    parser.add_argument("--n-inject-contextual", type=int, default=2,
-                        help="Number of token sequences to inject for contextual strategies "
-                             "(bigram_before, bigram_after, trigram, comma_list). "
-                             "Default is smaller since each injection is a multi-token sequence.")
+                        help="Number of tokens to inject for simple strategies "
+                             "(prepend, append, intersperse, replace, comma_list)")
+    parser.add_argument("--n-inject-bigram", type=int, default=2,
+                        help="Number of bigram sequences to inject for bigram strategies "
+                             "(bigram_before, bigram_after)")
+    parser.add_argument("--n-inject-trigram", type=int, default=1,
+                        help="Number of trigram sequences to inject for trigram strategies "
+                             "(trigram, active_trigram)")
+    parser.add_argument("--active-trigram-threshold", type=float, default=0.1,
+                        help="Threshold for 'active' tokens as percentage of max activation (0.0 to 1.0). "
+                             "Tokens with activation >= max_activation * threshold are considered active.")
     parser.add_argument("--strategies", type=str, nargs="+",
-                        default=["prepend", "append", "intersperse", "replace", "bigram_before", "bigram_after", "trigram", "comma_list"],
+                        default=["prepend", "append", "intersperse", "replace", "bigram_before", "bigram_after", "trigram", "comma_list", "active_trigram"],
                         help="Injection strategies to test. Options: prepend, append, intersperse, "
-                             "replace, bigram_before, bigram_after, trigram, comma_list")
+                             "replace, bigram_before, bigram_after, trigram, comma_list, active_trigram")
     parser.add_argument("--n-samples", type=int, default=100,
                         help="Number of samples per condition")
     parser.add_argument("--reasoning-dataset", type=str, default="s1k",
@@ -599,7 +744,7 @@ def main():
     print(f"Loaded {len(nonreasoning_texts)} non-reasoning texts")
     
     # Check if contextual strategies are requested
-    contextual_strategies = {"bigram_before", "bigram_after", "trigram", "comma_list"}
+    contextual_strategies = {"bigram_before", "bigram_after", "trigram", "active_trigram"}
     use_contexts = bool(set(args.strategies) & contextual_strategies)
     
     # Extract token contexts if needed
@@ -645,6 +790,23 @@ def main():
                 token: global_token_contexts.get(token, {"before": [], "after": []})
                 for token in top_tokens
             }
+            # Add active trigram sequences if that strategy is requested
+            if "active_trigram" in args.strategies:
+                print(f"    Extracting active trigram sequences (threshold={args.active_trigram_threshold})...")
+                active_seqs = extract_active_trigram_sequences(
+                    model, sae, tokenizer,
+                    reasoning_texts[:50],  # Limit texts for efficiency
+                    feat_idx, args.layer, args.device,
+                    activation_threshold=args.active_trigram_threshold,
+                    max_sequences=50,
+                    max_length=args.max_length,
+                )
+                feature_token_contexts["active_sequences"] = active_seqs
+                if active_seqs:
+                    print(f"    Found {len(active_seqs)} active trigram sequences")
+                    print(f"    Examples: {active_seqs[:3]}")
+                else:
+                    print(f"    No active trigram sequences found, will fallback")
         else:
             feature_token_contexts = None
         
@@ -657,7 +819,8 @@ def main():
             nonreasoning_texts, reasoning_texts,
             args.layer, args.device,
             n_inject=args.n_inject,
-            n_inject_contextual=args.n_inject_contextual,
+            n_inject_bigram=args.n_inject_bigram,
+            n_inject_trigram=args.n_inject_trigram,
             strategies=args.strategies,
             token_contexts=feature_token_contexts,
             batch_size=args.batch_size,
@@ -697,7 +860,9 @@ def main():
             "top_k_features": args.top_k_features,
             "top_k_tokens": args.top_k_tokens,
             "n_inject": args.n_inject,
-            "n_inject_contextual": args.n_inject_contextual,
+            "n_inject_bigram": args.n_inject_bigram,
+            "n_inject_trigram": args.n_inject_trigram,
+            "active_trigram_threshold": args.active_trigram_threshold,
             "strategies": args.strategies,
             "n_samples": args.n_samples,
         },

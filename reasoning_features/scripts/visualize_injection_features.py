@@ -137,6 +137,94 @@ def get_token_sequences_from_reasoning_texts(
     return result
 
 
+def extract_active_trigram_sequences(
+    model,
+    sae,
+    tokenizer,
+    reasoning_texts: list[str],
+    feature_index: int,
+    layer: int,
+    device: str,
+    activation_threshold: float = 0.1,
+    max_sequences: int = 50,
+    max_length: int = 128,
+) -> list[list[str]]:
+    """Extract consecutive 3-token sequences where all tokens activate the feature.
+    
+    This finds natural trigrams from reasoning texts where all three consecutive
+    tokens have feature activation above the threshold (as percentage of max activation).
+    
+    Args:
+        model: The transformer model
+        sae: The sparse autoencoder
+        tokenizer: The tokenizer
+        reasoning_texts: List of reasoning text samples
+        feature_index: Index of the feature to check
+        layer: Layer index
+        device: Device to run on
+        activation_threshold: Threshold as percentage of max activation (0.0 to 1.0)
+        max_sequences: Maximum number of sequences to return
+        max_length: Maximum sequence length for tokenization
+        
+    Returns:
+        List of [token1, token2, token3] sequences as strings
+    """
+    sequences = []
+    
+    # Process texts to find active trigrams
+    for text in reasoning_texts:
+        if len(sequences) >= max_sequences:
+            break
+            
+        # Tokenize
+        inputs = tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_length,
+            padding=False,
+        ).to(device)
+        
+        token_ids = inputs["input_ids"][0].tolist()
+        if len(token_ids) < 4:  # Need at least 3 tokens + BOS
+            continue
+        
+        # Get activations
+        with torch.no_grad():
+            _, cache = model.run_with_cache(
+                inputs["input_ids"],
+                names_filter=[f"blocks.{layer}.hook_resid_post"],
+            )
+            hidden = cache[f"blocks.{layer}.hook_resid_post"]
+            sae_acts = sae.encode(hidden)
+            feature_acts = sae_acts[0, :, feature_index].cpu().numpy()
+        
+        # Compute threshold based on max activation in this text
+        max_act = feature_acts.max()
+        if max_act <= 0:
+            continue
+        threshold = max_act * activation_threshold
+        
+        # Find consecutive trigrams where all tokens are active
+        for i in range(1, len(token_ids) - 2):  # Skip BOS, leave room for trigram
+            if (feature_acts[i] >= threshold and 
+                feature_acts[i+1] >= threshold and 
+                feature_acts[i+2] >= threshold):
+                # Decode each token
+                t1 = tokenizer.decode([token_ids[i]])
+                t2 = tokenizer.decode([token_ids[i+1]])
+                t3 = tokenizer.decode([token_ids[i+2]])
+                
+                # Skip if any token is empty or just whitespace
+                if t1.strip() and t2.strip() and t3.strip():
+                    sequences.append([t1, t2, t3])
+                    
+                    if len(sequences) >= max_sequences:
+                        break
+    
+    return sequences[:max_sequences]
+
+
 def inject_tokens_into_text(
     text: str,
     tokens: list[str],
@@ -173,9 +261,10 @@ def inject_tokens_into_text(
     
     # Simple strategies - wrap injected content with markers
     if strategy == "prepend":
-        injection = " ".join(selected_tokens) + " "
+        # Prepend tokens, mark only the content (not trailing space)
+        injection = " ".join(selected_tokens)
         marked_injection = START_MARKER + injection + END_MARKER
-        result = marked_injection + text
+        result = marked_injection + " " + text
     
     elif strategy == "intersperse":
         if len(words) < 2:
@@ -289,6 +378,46 @@ def inject_tokens_into_text(
         injection = ", ".join(selected_tokens)
         marked_injection = START_MARKER + injection + END_MARKER
         result = text + " " + marked_injection
+    
+    elif strategy == "active_trigram":
+        # Inject consecutive token sequences from reasoning texts that all activate
+        if not token_contexts or "active_sequences" not in token_contexts:
+            # Fallback: just use selected tokens
+            if len(selected_tokens) >= 3:
+                trigram_str = " ".join(selected_tokens[:3])
+            else:
+                trigram_str = " ".join(selected_tokens)
+            marked_trigram = START_MARKER + trigram_str + END_MARKER
+            if len(words) < 2:
+                result = marked_trigram + " " + text
+            else:
+                pos = random.randint(0, len(words))
+                words.insert(pos, marked_trigram)
+                result = " ".join(words)
+        else:
+            sequences = token_contexts["active_sequences"]
+            if not sequences:
+                # Fallback
+                trigram_str = " ".join(selected_tokens[:min(3, len(selected_tokens))])
+                marked_trigram = START_MARKER + trigram_str + END_MARKER
+                if len(words) < 2:
+                    result = marked_trigram + " " + text
+                else:
+                    pos = random.randint(0, len(words))
+                    words.insert(pos, marked_trigram)
+                    result = " ".join(words)
+            else:
+                # Select n_inject sequences
+                selected_seqs = random.sample(sequences, min(n_inject, len(sequences)))
+                for seq in selected_seqs:
+                    seq_str = " ".join(seq)
+                    marked_seq = START_MARKER + seq_str + END_MARKER
+                    if len(words) < 2:
+                        words = [marked_seq] + words
+                    else:
+                        pos = random.randint(0, len(words))
+                        words.insert(pos, marked_seq)
+                result = " ".join(words)
     
     else:
         return text, []
@@ -704,6 +833,7 @@ def generate_html_for_feature(
         ("bigram_after", "🔷 Injected: Bigram After", "#1e90ff"),
         ("trigram", "⭐ Injected: Trigram", "#ffd700"),
         ("comma_list", "📝 Injected: Comma List", "#20b2aa"),
+        ("active_trigram", "🔥 Injected: Active Trigram", "#dc143c"),
     ]
     
     for condition_key, condition_name, color in conditions:
@@ -795,6 +925,20 @@ def main():
     print(f"\nLoading injection results from {args.injection_results}")
     with open(args.injection_results) as f:
         inj_data = json.load(f)
+    
+    # Extract injection config parameters
+    inj_config = inj_data.get("config", {})
+    n_inject = inj_config.get("n_inject", 3)
+    n_inject_bigram = inj_config.get("n_inject_bigram", 2)
+    n_inject_trigram = inj_config.get("n_inject_trigram", 1)
+    active_trigram_threshold = inj_config.get("active_trigram_threshold", 0.1)
+    
+    strategies_from_config = inj_config.get("strategies", [])
+    
+    print(f"  Injection config: n_inject={n_inject}, n_inject_bigram={n_inject_bigram}, n_inject_trigram={n_inject_trigram}")
+    if "active_trigram" in strategies_from_config:
+        print(f"  Active trigram threshold: {active_trigram_threshold}")
+    print(f"  Strategies: {strategies_from_config}")
     
     features = inj_data.get("features", [])
     if not features:
@@ -892,22 +1036,30 @@ def main():
         print(f"  Extracting token contexts from reasoning texts...")
         token_contexts = get_token_sequences_from_reasoning_texts(reasoning_texts, top_tokens)
         
+        # Extract active trigram sequences if that strategy is in use
+        if "active_trigram" in strategies_from_config:
+            print(f"    Extracting active trigram sequences (threshold={active_trigram_threshold})...")
+            active_seqs = extract_active_trigram_sequences(
+                model, sae, tokenizer,
+                reasoning_texts[:30],  # Limit texts for efficiency
+                feat_idx, args.layer, args.device,
+                activation_threshold=active_trigram_threshold,
+                max_sequences=30,
+                max_length=128,
+            )
+            token_contexts["active_sequences"] = active_seqs
+            if active_seqs:
+                print(f"    Found {len(active_seqs)} active trigram sequences")
+                print(f"    Examples: {active_seqs[:2]}")
+        
         # Sample texts for this feature (shorter excerpts for visualization)
         sample_nonreasoning = random.sample(nonreasoning_texts, min(args.n_examples, len(nonreasoning_texts)))
         sample_reasoning = [text[:300] for text in random.sample(reasoning_texts, min(args.n_examples, len(reasoning_texts)))]
         
-        examples = {
-            "baseline": [],
-            "reasoning": [],
-            "prepend": [],
-            "intersperse": [],
-            "replace": [],
-            "append": [],
-            "bigram_before": [],
-            "bigram_after": [],
-            "trigram": [],
-            "comma_list": [],
-        }
+        # Build examples dict with baseline and all strategies from config
+        examples = {"baseline": [], "reasoning": []}
+        for strat in strategies_from_config:
+            examples[strat] = []
         
         # Get baseline activations (no injected tokens)
         for text in sample_nonreasoning:
@@ -929,17 +1081,21 @@ def main():
             is_injected = is_injected[:args.max_seq_len]
             examples["reasoning"].append((tokens, acts, is_injected))
         
-        # Get injected activations for each strategy
-        all_strategies = [
-            "prepend", "append", "intersperse", "replace",
-            "bigram_before", "bigram_after", "trigram", "comma_list"
-        ]
+        # Determine n_inject for each strategy type
+        def get_n_inject_for_strategy(strategy: str) -> int:
+            if strategy in ["prepend", "append", "intersperse", "replace", "comma_list"]:
+                return n_inject
+            elif strategy in ["bigram_before", "bigram_after"]:
+                return n_inject_bigram
+            else:  # trigram, active_trigram
+                return n_inject_trigram
         
-        for strategy in all_strategies:
+        for strategy in strategies_from_config:
+            strategy_n_inject = get_n_inject_for_strategy(strategy)
             for idx, text in enumerate(sample_nonreasoning):
                 # Inject tokens and get regions
                 injected_text, injected_regions = inject_tokens_into_text(
-                    text, top_tokens, n_inject=3, strategy=strategy,
+                    text, top_tokens, n_inject=strategy_n_inject, strategy=strategy,
                     seed=feat_idx * 1000 + idx, token_contexts=token_contexts
                 )
                 
