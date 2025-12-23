@@ -44,9 +44,9 @@ def parse_args():
     parser.add_argument("--token-analysis", type=Path, required=True)
     parser.add_argument("--layer", type=int, required=True)
     parser.add_argument("--n-features", type=int, default=10)
-    parser.add_argument("--n-examples", type=int, default=3,
+    parser.add_argument("--n-examples", type=int, default=10,
                         help="Number of example texts per condition")
-    parser.add_argument("--max-seq-len", type=int, default=64,
+    parser.add_argument("--max-seq-len", type=int, default=256,
                         help="Maximum sequence length to display")
     parser.add_argument("--model-name", default="google/gemma-2-9b")
     parser.add_argument("--sae-name", default="gemma-scope-9b-pt-res-canonical")
@@ -82,153 +82,255 @@ def load_top_tokens_with_activations(token_analysis_path: Path, feature_index: i
     return []
 
 
-def inject_tokens_into_text(text: str, tokens: list[str], n_inject: int, strategy: str, seed: Optional[int] = None) -> tuple[str, list[tuple[int, int]]]:
+def get_token_sequences_from_reasoning_texts(
+    reasoning_texts: list[str],
+    target_tokens: list[str],
+) -> dict[str, dict[str, list[str]]]:
+    """Extract bigrams, trigrams, and contextual patterns from reasoning texts.
+    
+    For each target token, extracts:
+    - before: Tokens that appear immediately before the target
+    - after: Tokens that appear immediately after the target
+    
+    Args:
+        reasoning_texts: List of reasoning texts to analyze
+        target_tokens: Tokens to find contexts for
+        
+    Returns:
+        Dict mapping token -> {"before": [words], "after": [words]}
+    """
+    from collections import Counter
+    
+    # Normalize target tokens for matching
+    target_set = {t.strip().lower() for t in target_tokens}
+    
+    # Count contexts
+    token_contexts = {token: {"before": Counter(), "after": Counter()} for token in target_tokens}
+    
+    for text in reasoning_texts:
+        words = text.split()
+        for i, word in enumerate(words):
+            # Normalize word for matching
+            normalized = word.strip('.,!?;:').lower()
+            
+            # Check if any target token matches
+            for target in target_tokens:
+                if normalized == target.strip().lower():
+                    # Extract preceding tokens
+                    if i > 0:
+                        prev_word = words[i-1].strip('.,!?;:').lower()
+                        token_contexts[target]["before"][prev_word] += 1
+                    
+                    # Extract following tokens
+                    if i < len(words) - 1:
+                        next_word = words[i+1].strip('.,!?;:').lower()
+                        token_contexts[target]["after"][next_word] += 1
+    
+    # Convert Counters to sorted lists (most common first)
+    result = {}
+    for token in target_tokens:
+        result[token] = {
+            "before": [tok for tok, _ in token_contexts[token]["before"].most_common(10)],
+            "after": [tok for tok, _ in token_contexts[token]["after"].most_common(10)],
+        }
+    
+    return result
+
+
+def inject_tokens_into_text(
+    text: str,
+    tokens: list[str],
+    n_inject: int,
+    strategy: str,
+    seed: Optional[int] = None,
+    token_contexts: Optional[dict[str, dict[str, list[str]]]] = None,
+) -> tuple[str, list[tuple[int, int]]]:
     """Inject tokens into text using specified strategy.
     
+    This function mirrors the logic in run_token_injection_experiment.py exactly,
+    but also tracks character positions of injected content.
+    
+    Args:
+        text: Original text
+        tokens: List of tokens to inject (already have space prefix from token_analysis)
+        n_inject: Number of tokens/phrases to inject
+        strategy: Injection strategy
+        seed: Random seed for reproducibility
+        token_contexts: Optional context information for contextual strategies
+    
     Returns:
-        tuple: (injected_text, list of (start_char, end_char) positions of injected tokens)
+        tuple: (injected_text, list of (start_char, end_char) tuples for injected regions)
     """
     if seed is not None:
         random.seed(seed)
     
-    selected_tokens = random.sample(tokens, min(n_inject, len(tokens)))
-    injected_positions = []
+    # Use unique markers to track injected content
+    START_MARKER = "⟪INJECT⟫"
+    END_MARKER = "⟪/INJECT⟫"
     
+    selected_tokens = random.sample(tokens, min(n_inject, len(tokens)))
+    words = text.split()
+    
+    # Simple strategies - wrap injected content with markers
     if strategy == "prepend":
-        # Prepend tokens at the beginning
-        # Build prefix and track exact token positions
-        prefix = ""
-        for token in selected_tokens:
-            token_start = len(prefix)
-            prefix += token
-            token_end = len(prefix)
-            injected_positions.append((token_start, token_end))
-        
-        # Add space before original text if needed
-        if prefix and not prefix.endswith(' '):
-            prefix += ' '
-        
-        return prefix + text, injected_positions
+        injection = " ".join(selected_tokens) + " "
+        marked_injection = START_MARKER + injection + END_MARKER
+        result = marked_injection + text
     
     elif strategy == "intersperse":
-        words = text.split()
         if len(words) < 2:
-            # Same as prepend for short text
-            prefix = ""
+            injection = " ".join(selected_tokens) + " "
+            marked_injection = START_MARKER + injection + END_MARKER
+            result = marked_injection + text
+        else:
             for token in selected_tokens:
-                token_start = len(prefix)
-                prefix += token
-                token_end = len(prefix)
-                injected_positions.append((token_start, token_end))
-            if prefix and not prefix.endswith(' '):
-                prefix += ' '
-            return prefix + text, injected_positions
-        
-        # Insert tokens at random positions and track their positions
-        # Use markers to track injection sites
-        insert_positions = sorted([random.randint(0, len(words)) for _ in selected_tokens])
-        for i, (token, pos) in enumerate(zip(selected_tokens, insert_positions)):
-            # Adjust position for previously inserted tokens
-            adjusted_pos = pos + i
-            # Insert the token itself, not with extra formatting
-            words.insert(adjusted_pos, f"[INJ_START]{token}[INJ_END]")
-        
-        # Smart join: don't add space before items that already start with space or markers
-        result_parts = []
-        for i, word in enumerate(words):
-            if i > 0 and not word.startswith(' ') and not word.startswith('[INJ_START]'):
-                result_parts.append(' ')
-            result_parts.append(word)
-        result = "".join(result_parts)
-        
-        # Find positions of injected markers and extract the actual token text
-        marker_start_len = len("[INJ_START]")
-        marker_end_len = len("[INJ_END]")
-        temp_positions = []
-        pos = 0
-        while True:
-            start_marker = result.find("[INJ_START]", pos)
-            if start_marker == -1:
-                break
-            end_marker = result.find("[INJ_END]", start_marker)
-            # The actual token text is between start_marker+marker_start_len and end_marker
-            token_start_with_markers = start_marker
-            token_end_with_markers = end_marker + marker_end_len
-            temp_positions.append((token_start_with_markers, token_end_with_markers))
-            pos = token_end_with_markers
-        
-        # Remove markers from result
-        result = result.replace("[INJ_START]", "").replace("[INJ_END]", "")
-        
-        # Adjust positions after marker removal
-        # For each injection point, we removed marker_start_len + marker_end_len characters
-        marker_total_len = marker_start_len + marker_end_len
-        for i, (start_with_markers, end_with_markers) in enumerate(temp_positions):
-            # Adjust for markers removed before this position
-            offset = i * marker_total_len
-            adjusted_start = start_with_markers - offset
-            # The actual token length (without markers)
-            token_len = end_with_markers - start_with_markers - marker_total_len
-            adjusted_end = adjusted_start + token_len
-            injected_positions.append((adjusted_start, adjusted_end))
-        
-        return result, injected_positions
+                pos = random.randint(0, len(words))
+                # Mark each injected token
+                words.insert(pos, START_MARKER + token + END_MARKER)
+            result = " ".join(words)
     
     elif strategy == "replace":
-        words = text.split()
         if len(words) < len(selected_tokens):
-            result = " ".join(selected_tokens)
-            pos = 0
-            for token in selected_tokens:
-                injected_positions.append((pos, pos + len(token)))
-                pos += len(token) + 1
-            return result, injected_positions
-        
-        # Mark positions to replace
-        positions = sorted(random.sample(range(len(words)), len(selected_tokens)))
-        for pos, token in zip(positions, selected_tokens):
-            words[pos] = f"[INJ_START]{token}[INJ_END]"
-        
-        # Smart join: don't add space before items that already start with space or markers
-        result_parts = []
-        for i, word in enumerate(words):
-            if i > 0 and not word.startswith(' ') and not word.startswith('[INJ_START]'):
-                result_parts.append(' ')
-            result_parts.append(word)
-        result = "".join(result_parts)
-        
-        # Find positions of injected markers
-        marker_start_len = len("[INJ_START]")
-        marker_end_len = len("[INJ_END]")
-        temp_positions = []
-        pos = 0
-        while True:
-            start_marker = result.find("[INJ_START]", pos)
-            if start_marker == -1:
-                break
-            end_marker = result.find("[INJ_END]", start_marker)
-            token_start_with_markers = start_marker
-            token_end_with_markers = end_marker + marker_end_len
-            temp_positions.append((token_start_with_markers, token_end_with_markers))
-            pos = token_end_with_markers
-        
-        # Remove markers
-        result = result.replace("[INJ_START]", "").replace("[INJ_END]", "")
-        
-        # Adjust positions after marker removal
-        marker_total_len = marker_start_len + marker_end_len
-        for i, (start_with_markers, end_with_markers) in enumerate(temp_positions):
-            # Adjust for markers removed before this position
-            offset = i * marker_total_len
-            adjusted_start = start_with_markers - offset
-            # The actual token length (without markers)
-            token_len = end_with_markers - start_with_markers - marker_total_len
-            adjusted_end = adjusted_start + token_len
-            injected_positions.append((adjusted_start, adjusted_end))
-        
-        return result, injected_positions
+            result = " ".join([START_MARKER + t + END_MARKER for t in selected_tokens])
+        else:
+            positions = random.sample(range(len(words)), len(selected_tokens))
+            for pos, token in zip(positions, selected_tokens):
+                # Mark replaced word
+                words[pos] = START_MARKER + token + END_MARKER
+            result = " ".join(words)
     
-    return text, injected_positions
+    elif strategy == "append":
+        injection = " " + " ".join(selected_tokens)
+        marked_injection = START_MARKER + injection + END_MARKER
+        result = text + marked_injection
+    
+    # Contextual strategies
+    elif strategy == "bigram_before":
+        if not token_contexts:
+            injection = " ".join(selected_tokens) + " "
+            marked_injection = START_MARKER + injection + END_MARKER
+            result = marked_injection + text
+        else:
+            bigrams = []
+            for token in selected_tokens:
+                context_words = token_contexts.get(token, {}).get("before", [])
+                if context_words:
+                    context = random.choice(context_words[:3])
+                    # Mark the entire bigram
+                    bigrams.append(START_MARKER + f"{context} {token}" + END_MARKER)
+                else:
+                    bigrams.append(START_MARKER + token + END_MARKER)
+            
+            if len(words) < 2:
+                result = " ".join(bigrams) + " " + text
+            else:
+                for bigram in bigrams:
+                    pos = random.randint(0, len(words))
+                    words.insert(pos, bigram)
+                result = " ".join(words)
+    
+    elif strategy == "bigram_after":
+        if not token_contexts:
+            injection = " " + " ".join(selected_tokens)
+            marked_injection = START_MARKER + injection + END_MARKER
+            result = text + marked_injection
+        else:
+            bigrams = []
+            for token in selected_tokens:
+                context_words = token_contexts.get(token, {}).get("after", [])
+                if context_words:
+                    context = random.choice(context_words[:3])
+                    bigrams.append(START_MARKER + f"{token} {context}" + END_MARKER)
+                else:
+                    bigrams.append(START_MARKER + token + END_MARKER)
+            
+            if len(words) < 2:
+                result = " ".join(bigrams) + " " + text
+            else:
+                for bigram in bigrams:
+                    pos = random.randint(0, len(words))
+                    words.insert(pos, bigram)
+                result = " ".join(words)
+    
+    elif strategy == "trigram":
+        if not token_contexts:
+            injection = " ".join(selected_tokens) + " "
+            marked_injection = START_MARKER + injection + END_MARKER
+            result = marked_injection + text
+        else:
+            trigrams = []
+            for token in selected_tokens:
+                contexts = token_contexts.get(token, {})
+                before_words = contexts.get("before", [])
+                after_words = contexts.get("after", [])
+                
+                if before_words and after_words:
+                    before = random.choice(before_words[:3])
+                    after = random.choice(after_words[:3])
+                    trigrams.append(START_MARKER + f"{before} {token} {after}" + END_MARKER)
+                elif before_words:
+                    before = random.choice(before_words[:3])
+                    trigrams.append(START_MARKER + f"{before} {token}" + END_MARKER)
+                elif after_words:
+                    after = random.choice(after_words[:3])
+                    trigrams.append(START_MARKER + f"{token} {after}" + END_MARKER)
+                else:
+                    trigrams.append(START_MARKER + token + END_MARKER)
+            
+            if len(words) < 2:
+                result = " ".join(trigrams) + " " + text
+            else:
+                for trigram in trigrams:
+                    pos = random.randint(0, len(words))
+                    words.insert(pos, trigram)
+                result = " ".join(words)
+    
+    elif strategy == "comma_list":
+        injection = ", ".join(selected_tokens)
+        marked_injection = START_MARKER + injection + END_MARKER
+        result = text + " " + marked_injection
+    
+    else:
+        return text, []
+    
+    # Find all marker pairs first
+    marker_pairs = []
+    search_pos = 0
+    while True:
+        start_idx = result.find(START_MARKER, search_pos)
+        if start_idx == -1:
+            break
+        end_idx = result.find(END_MARKER, start_idx)
+        if end_idx == -1:
+            break
+        
+        # Content is between the markers (exclusive of markers themselves)
+        content_start_marked = start_idx + len(START_MARKER)
+        content_end_marked = end_idx
+        marker_pairs.append((start_idx, content_start_marked, content_end_marked, end_idx + len(END_MARKER)))
+        search_pos = end_idx + len(END_MARKER)
+    
+    # Calculate positions in clean text (after all markers removed)
+    # Each marker pair removes len(START_MARKER) + len(END_MARKER) characters
+    marker_len = len(START_MARKER) + len(END_MARKER)
+    regions = []
+    
+    for i, (marker_start, content_start_marked, content_end_marked, marker_end) in enumerate(marker_pairs):
+        # How many marker characters are before this content?
+        # All previous marker pairs contribute their full length
+        offset = i * marker_len
+        # Plus the START_MARKER of current pair
+        offset += len(START_MARKER)
+        
+        # Positions in clean text
+        content_start_clean = content_start_marked - offset
+        content_end_clean = content_end_marked - offset
+        regions.append((content_start_clean, content_end_clean))
+    
+    # Remove all markers
+    clean_result = result.replace(START_MARKER, "").replace(END_MARKER, "")
+    
+    return clean_result, regions
 
 
 def get_token_activations(
@@ -239,21 +341,21 @@ def get_token_activations(
     layer: int,
     feature_index: int,
     device: str,
-    injected_char_positions: Optional[list[tuple[int, int]]] = None,
+    injected_regions: Optional[list[tuple[int, int]]] = None,
 ) -> tuple[list[str], Float[np.ndarray, "seq"], list[bool]]:
     """Get token-level activations for a single text.
     
     Args:
-        injected_char_positions: List of (start, end) character positions of injected text
+        injected_regions: List of (start_char, end_char) tuples marking injected text regions
     
     Returns:
         tuple: (token_strings, activations, is_injected_flags)
     """
     hook_name = f"blocks.{layer}.hook_resid_post"
     
-    tokens = tokenizer(text, return_tensors="pt", truncation=True, max_length=128, return_offsets_mapping=True)
+    tokens = tokenizer(text, return_tensors="pt", truncation=True, max_length=512, return_offsets_mapping=True)
     input_ids: Int[torch.Tensor, "1 seq"] = tokens["input_ids"].to(device)
-    offset_mapping = tokens["offset_mapping"][0]  # Character spans for each token
+    offset_mapping = tokens.get("offset_mapping", [[]] * len(input_ids))[0]
     
     with torch.no_grad():
         _, cache = model.run_with_cache(input_ids, stop_at_layer=layer + 1)
@@ -261,42 +363,39 @@ def get_token_activations(
         sae_out: Float[torch.Tensor, "1 seq n_features"] = sae.encode(hidden)
         activations = sae_out[0, :, feature_index].cpu().numpy()
     
-    # Get token strings - decode each individually (spaces are preserved automatically)
+    # Get token strings
     token_ids = input_ids[0].cpu().tolist()
     token_strs = []
     kept_indices = []
     is_injected = []
     
     for i, tid in enumerate(token_ids):
-        # Decode token (keeps spaces automatically)
         token_str = tokenizer.decode([tid])
         
-        # Skip if it's a special token (check tokenizer's special tokens)
         if tid in tokenizer.all_special_ids:
             continue
         
-        # Also skip empty tokens
-        if not token_str or token_str.strip() == '':
+        if not token_str:
             continue
         
-        # Replace newlines with spaces to prevent random line breaks in HTML
         token_str = token_str.replace('\n', ' ').replace('\r', ' ')
         
-        # Check if this token overlaps with any injected character positions
+        # Determine if this token overlaps with any injected region
         token_is_injected = False
-        if injected_char_positions:
-            token_start, token_end = offset_mapping[i].tolist()
-            for inj_start, inj_end in injected_char_positions:
-                # Check for overlap
-                if not (token_end <= inj_start or token_start >= inj_end):
-                    token_is_injected = True
-                    break
-            
+        if injected_regions and i < len(offset_mapping):
+            token_start, token_end = offset_mapping[i]
+            for region_start, region_end in injected_regions:
+                # Mark if overlaps AND not whitespace-only
+                if not (token_end <= region_start or token_start >= region_end):
+                    is_whitespace = token_str.strip() == ''
+                    if not is_whitespace:
+                        token_is_injected = True
+                        break
+        
         token_strs.append(token_str)
         kept_indices.append(i)
         is_injected.append(token_is_injected)
     
-    # Filter activations to match kept tokens
     filtered_activations = activations[kept_indices] if kept_indices else activations[:0]
     
     return token_strs, filtered_activations, is_injected
@@ -598,8 +697,13 @@ def generate_html_for_feature(
         ("baseline", "🔵 Baseline (Non-Reasoning)", "#3498db"),
         ("reasoning", "🟢 Reasoning Text", "#2ecc71"),
         ("prepend", "🔴 Injected: Prepend", "#e74c3c"),
+        ("append", "🟤 Injected: Append", "#8b4513"),
         ("intersperse", "🟠 Injected: Intersperse", "#f39c12"),
         ("replace", "🟣 Injected: Replace", "#9b59b6"),
+        ("bigram_before", "🔶 Injected: Bigram Before", "#ff8c00"),
+        ("bigram_after", "🔷 Injected: Bigram After", "#1e90ff"),
+        ("trigram", "⭐ Injected: Trigram", "#ffd700"),
+        ("comma_list", "📝 Injected: Comma List", "#20b2aa"),
     ]
     
     for condition_key, condition_name, color in conditions:
@@ -657,8 +761,8 @@ def generate_html_for_feature(
         
         # Add legend
         legend_extra = ""
-        if condition_key in ["prepend", "intersperse", "replace"]:
-            legend_extra = ' • <span style="border: 2px solid #ff00ff; padding: 2px 6px; border-radius: 3px; font-weight: bold;">💉 Purple border</span> = Injected token'
+        if condition_key not in ["baseline", "reasoning"]:
+            legend_extra = ' • <span style="border: 2px solid #ff00ff; padding: 2px 6px; border-radius: 3px; font-weight: bold;">💉 Purple border</span> = Injected token/phrase'
         
         html += f"""
         <div class="legend">
@@ -739,17 +843,17 @@ def main():
             if len(nonreasoning_texts) >= args.n_examples * 5:
                 break
     
-    # Reasoning texts
+    # Reasoning texts (load more for context extraction)
     reasoning_texts = []
     if args.reasoning_dataset == "s1k":
         ds = load_dataset("simplescaling/s1K-1.1", split="train")
         for row in ds:
             for key in ["gemini_thinking_trajectory", "deepseek_thinking_trajectory"]:
                 if row.get(key):
-                    reasoning_texts.append(row[key][:300])
-                    if len(reasoning_texts) >= args.n_examples * 5:
+                    reasoning_texts.append(row[key])
+                    if len(reasoning_texts) >= 200:  # More texts for context
                         break
-            if len(reasoning_texts) >= args.n_examples * 5:
+            if len(reasoning_texts) >= 200:
                 break
     else:
         ds = load_dataset("moremilk/General_Inquiry_Thinking-Chain-Of-Thought", split="train")
@@ -759,8 +863,8 @@ def main():
                 text = metadata.get("reasoning", "")
                 if text:
                     text = text.replace("<think>", "").replace("</think>", "").strip()
-                    reasoning_texts.append(text[:300])
-                    if len(reasoning_texts) >= args.n_examples * 5:
+                    reasoning_texts.append(text)
+                    if len(reasoning_texts) >= 200:
                         break
     
     print(f"Loaded {len(nonreasoning_texts)} non-reasoning and {len(reasoning_texts)} reasoning texts")
@@ -784,9 +888,13 @@ def main():
         # Load top tokens with full data for display
         top_tokens_with_data = load_top_tokens_with_activations(args.token_analysis, feat_idx, top_k=20)
         
-        # Sample texts for this feature
+        # Extract token contexts for contextual strategies
+        print(f"  Extracting token contexts from reasoning texts...")
+        token_contexts = get_token_sequences_from_reasoning_texts(reasoning_texts, top_tokens)
+        
+        # Sample texts for this feature (shorter excerpts for visualization)
         sample_nonreasoning = random.sample(nonreasoning_texts, min(args.n_examples, len(nonreasoning_texts)))
-        sample_reasoning = random.sample(reasoning_texts, min(args.n_examples, len(reasoning_texts)))
+        sample_reasoning = [text[:300] for text in random.sample(reasoning_texts, min(args.n_examples, len(reasoning_texts)))]
         
         examples = {
             "baseline": [],
@@ -794,14 +902,18 @@ def main():
             "prepend": [],
             "intersperse": [],
             "replace": [],
+            "append": [],
+            "bigram_before": [],
+            "bigram_after": [],
+            "trigram": [],
+            "comma_list": [],
         }
         
         # Get baseline activations (no injected tokens)
         for text in sample_nonreasoning:
             tokens, acts, is_injected = get_token_activations(
-                text, model, sae, tokenizer, args.layer, feat_idx, args.device, injected_char_positions=None
+                text, model, sae, tokenizer, args.layer, feat_idx, args.device
             )
-            # Truncate to max_seq_len
             tokens = tokens[:args.max_seq_len]
             acts = acts[:args.max_seq_len]
             is_injected = is_injected[:args.max_seq_len]
@@ -810,7 +922,7 @@ def main():
         # Get reasoning activations (no injected tokens)
         for text in sample_reasoning:
             tokens, acts, is_injected = get_token_activations(
-                text, model, sae, tokenizer, args.layer, feat_idx, args.device, injected_char_positions=None
+                text, model, sae, tokenizer, args.layer, feat_idx, args.device
             )
             tokens = tokens[:args.max_seq_len]
             acts = acts[:args.max_seq_len]
@@ -818,16 +930,25 @@ def main():
             examples["reasoning"].append((tokens, acts, is_injected))
         
         # Get injected activations for each strategy
-        for strategy in ["prepend", "intersperse", "replace"]:
+        all_strategies = [
+            "prepend", "append", "intersperse", "replace",
+            "bigram_before", "bigram_after", "trigram", "comma_list"
+        ]
+        
+        for strategy in all_strategies:
             for idx, text in enumerate(sample_nonreasoning):
-                # Use idx as seed for reproducibility
-                injected_text, injected_char_positions = inject_tokens_into_text(
-                    text, top_tokens, n_inject=3, strategy=strategy, seed=feat_idx * 1000 + idx
+                # Inject tokens and get regions
+                injected_text, injected_regions = inject_tokens_into_text(
+                    text, top_tokens, n_inject=3, strategy=strategy,
+                    seed=feat_idx * 1000 + idx, token_contexts=token_contexts
                 )
+                
+                # Get activations with region-based marking
                 tokens, acts, is_injected = get_token_activations(
                     injected_text, model, sae, tokenizer, args.layer, feat_idx, args.device,
-                    injected_char_positions=injected_char_positions
+                    injected_regions=injected_regions
                 )
+                
                 tokens = tokens[:args.max_seq_len]
                 acts = acts[:args.max_seq_len]
                 is_injected = is_injected[:args.max_seq_len]
