@@ -11,7 +11,9 @@ for layer in 0 4 8 12 16 20 24; do
         --active-trigram-threshold 0.5 \
         --n-samples 500 \
         --reasoning-dataset s1k \
-        --save-dir results/initial-setting/gemma-2-9b/s1k/layer$layer
+        --save-dir results/initial-setting/gemma-2-9b/s1k/layer$layer \
+        --batch-size 16 \
+        --max-length 64 \
     python reasoning_features/scripts/run_token_injection_experiment.py \
         --token-analysis results/initial-setting/gemma-2-9b/general_inquiry_cot/layer$layer/token_analysis.json \
         --reasoning-features results/initial-setting/gemma-2-9b/general_inquiry_cot/layer$layer/reasoning_features.json \
@@ -24,5 +26,7 @@ for layer in 0 4 8 12 16 20 24; do
         --active-trigram-threshold 0.5 \
         --n-samples 500 \
         --reasoning-dataset general_inquiry_cot \
-        --save-dir results/initial-setting/gemma-2-9b/general_inquiry_cot/layer$layer
+        --save-dir results/initial-setting/gemma-2-9b/general_inquiry_cot/layer$layer \
+        --batch-size 16 \
+        --max-length 64 \
 done
