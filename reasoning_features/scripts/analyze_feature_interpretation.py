@@ -68,6 +68,7 @@ class FeatureInterpretation:
     confidence: str
     is_genuine_reasoning_feature: bool
     summary: str
+    iterations_used: int
 
 
 class LLMClient:
@@ -99,6 +100,16 @@ class LLMClient:
             raise Exception(f"API Error: {result['error']}")
         
         return result["choices"][0]["message"]["content"]
+
+
+def format_tokens_with_activations(tokens: list) -> str:
+    """Format a list of (token, activation) tuples for display."""
+    parts = []
+    for t in tokens:
+        token_str = t[0].strip()
+        activation = t[1]
+        parts.append(f'"{token_str}"({activation:.1f})')
+    return ", ".join(parts)
 
 
 class FeatureAnalyzer:
@@ -152,7 +163,7 @@ class FeatureAnalyzer:
         """Collect examples of high activation with context."""
         examples = []
         
-        for text in reasoning_texts[:100]:
+        for text in reasoning_texts[:500]:
             max_act, mean_act, top_tokens = self.get_activation(text, feature_index)
             
             if max_act > 5:
@@ -160,7 +171,7 @@ class FeatureAnalyzer:
                     "text": text[:500],
                     "max_activation": max_act,
                     "mean_activation": mean_act,
-                    "top_tokens": top_tokens[:5],
+                    "top_tokens": top_tokens[:10],
                 })
         
         # Sort by activation and return top N
@@ -177,31 +188,37 @@ class FeatureAnalyzer:
         
         examples_text = "\n\n".join([
             f"Example {i+1} (max activation: {ex['max_activation']:.1f}):\n"
-            f"Text: {ex['text'][:300]}...\n"
-            f"Top activating tokens: {ex['top_tokens']}"
+            f"Text: {ex['text'][:400]}...\n"
+            f"Tokens with highest activation: {format_tokens_with_activations(ex.get('top_tokens', [])[:7])}"
             for i, ex in enumerate(high_activation_examples[:5])
         ])
         
-        prompt = f"""You are analyzing an SAE (Sparse Autoencoder) feature from a language model.
+        prompt = f"""You are analyzing a neural network feature (from a Sparse Autoencoder) to understand what linguistic pattern it detects.
 
-This feature was identified as potentially detecting "reasoning" in text, but we need to determine what it ACTUALLY detects.
+## Top Tokens That Activate This Feature (ranked by mean activation across dataset)
+{', '.join([f'"{t.strip()}"' for t in top_tokens[:20]])}
 
-## Top Tokens (by mean activation)
-{', '.join(top_tokens[:15])}
-
-## High Activation Examples
+## High Activation Examples (texts where this feature fires strongly)
 {examples_text}
 
-## Task
-Based on these examples, generate a hypothesis about what linguistic pattern this feature detects.
+## Analysis Task
+Based on the top tokens AND the example texts, determine what this feature ACTUALLY detects.
 
-Consider:
-1. Is it detecting specific vocabulary/topics?
-2. Is it detecting a writing style (formal, elaborate, simple)?
-3. Is it detecting discourse structure (reasoning, narrative, explanatory)?
-4. Is it detecting something else entirely?
+Consider these possibilities (not mutually exclusive):
+- Specific vocabulary or word categories (e.g., modal verbs, technical terms)
+- Syntactic patterns (e.g., subordinate clauses, conditionals)
+- Discourse markers (e.g., hedging, planning, meta-cognition)
+- Writing style (e.g., formal/informal, complex/simple, verbose/concise)
+- Content type (e.g., explanations, instructions, analysis)
+- Text characteristics (e.g., sentence length, complexity)
+
+Pay close attention to:
+1. What tokens ACTUALLY activate (not just what the text is about)
+2. Common patterns across ALL examples
+3. What might be a confound (e.g., detecting formality, not reasoning)
 
 Provide your hypothesis in 2-3 sentences. Be specific and testable.
+Focus on what linguistic pattern causes activation, not just what the texts are about.
 """
         
         response = self.llm.chat([{"role": "user", "content": prompt}], temperature=0.3)
@@ -212,38 +229,81 @@ Provide your hypothesis in 2-3 sentences. Be specific and testable.
         feature_index: int,
         hypothesis: str,
         high_activation_examples: list[dict],
+        top_tokens: list[str],
         category: str,  # 'false_positive' or 'false_negative'
+        previous_attempts: list = None,  # Previous counterexample results
     ) -> list[str]:
         """Use LLM to generate counterexample candidates."""
+        previous_attempts = previous_attempts or []
+        
+        # Build previous attempts summary
+        prev_summary = ""
+        if previous_attempts:
+            successful = [ce for ce in previous_attempts if ce.category == category and ce.is_valid_counterexample]
+            failed = [ce for ce in previous_attempts if ce.category == category and not ce.is_valid_counterexample]
+            
+            if successful:
+                prev_summary += "\n\n## Previous SUCCESSFUL attempts (these worked - generate similar ones):\n"
+                for ce in successful[:3]:
+                    prev_summary += f"- \"{ce.text[:150]}...\" (activation: {ce.max_activation:.1f}) ✓\n"
+            
+            if failed:
+                prev_summary += "\n\n## Previous FAILED attempts (these did NOT work - avoid similar patterns):\n"
+                for ce in failed[:30]:
+                    prev_summary += f"- \"{ce.text[:150]}...\" (activation: {ce.max_activation:.1f}) ✗\n"
         
         if category == "false_positive":
-            task = """Generate 5 text examples that:
-- Are clearly NOT reasoning/problem-solving/deliberation
-- But SHOULD activate this feature according to the hypothesis
-- Could be: recipes, product reviews, sports commentary, narrative fiction, etc.
+            goal = "Find NON-REASONING text that ACTIVATES this feature"
+            task = f"""Generate 5 text examples that:
+1. Are clearly NOT reasoning/thinking/problem-solving/deliberation
+2. But will ACTIVATE this feature (achieve high activation like the examples above)
 
-Each example should be 50-100 words and aim to "fool" the feature."""
+Strategy: Based on the hypothesis and top tokens, create non-reasoning content (recipes, product reviews, sports commentary, news, fiction, etc.) that contains the linguistic patterns this feature detects.
+
+Key insight: The feature activates on tokens like: {', '.join(top_tokens[:10])}
+Try to naturally incorporate these patterns into non-reasoning contexts.
+
+Each example should be 50-100 words."""
         else:
-            task = """Generate 5 text examples that:
-- ARE clearly reasoning/problem-solving/deliberation
-- But SHOULD NOT activate this feature according to the hypothesis
-- Could be: simple reasoning, informal problem-solving, etc.
+            goal = "Find REASONING text that does NOT activate this feature"
+            task = f"""Generate 5 text examples that:
+1. ARE clearly reasoning/thinking/problem-solving/deliberation
+2. But will NOT activate this feature (achieve LOW or zero activation)
 
-Each example should be 50-100 words and aim to show the feature misses real reasoning."""
+Strategy: Based on the hypothesis and top tokens, create genuine reasoning content that AVOIDS the linguistic patterns this feature detects.
+
+Key insight: The feature activates on tokens like: {', '.join(top_tokens[:10])}
+Create reasoning that uses different vocabulary, simpler structure, or informal style.
+
+Ideas: casual problem-solving, stream-of-consciousness thinking, simple logical deduction, everyday decisions, troubleshooting without formal language.
+
+Each example should be 50-100 words."""
         
-        prompt = f"""You are testing a hypothesis about what an SAE feature detects.
+        # Build examples text with activating tokens
+        examples_text = "\n\n".join([
+            f"Example {i+1} (max activation: {ex['max_activation']:.1f}):\n"
+            f"Text: {ex['text'][:350]}...\n"
+            f"Activating tokens: {format_tokens_with_activations(ex.get('top_tokens', [])[:7])}"
+            for i, ex in enumerate(high_activation_examples[:3])
+        ])
+        
+        prompt = f"""## Goal: {goal}
 
-## Hypothesis
+## What This Feature Detects (Hypothesis)
 {hypothesis}
 
-## Example of high-activation text
-{high_activation_examples[0]['text'][:300]}...
+## Top Tokens for this Feature (ranked by mean activation)
+{', '.join([f'"{t.strip()}"' for t in top_tokens[:20]])}
 
-## Task
+## Examples of High-Activation Text (what DOES activate)
+{examples_text}
+{prev_summary}
+## Your Task
 {task}
 
-Format your response as a JSON array of 5 strings, each containing one example text.
-Only output the JSON array, nothing else."""
+IMPORTANT: Generate diverse examples. Each should try a different approach.
+
+Format: JSON array of 5 strings. Only output the JSON, nothing else."""
         
         response = self.llm.chat([{"role": "user", "content": prompt}], temperature=0.8)
         
@@ -290,7 +350,7 @@ Only output the JSON array, nothing else."""
                 expected_reasoning = False
             else:
                 # Reasoning text that doesn't activate = valid counterexample
-                is_valid = max_act < activation_threshold * 0.5
+                is_valid = max_act < activation_threshold * 0.1
                 expected_reasoning = True
             
             results.append(CounterExample(
@@ -310,6 +370,8 @@ Only output the JSON array, nothing else."""
         initial_hypothesis: str,
         valid_counterexamples: list[CounterExample],
         high_activation_examples: list[dict],
+        top_tokens: list[str],
+        iterations_used: int,
     ) -> FeatureInterpretation:
         """Refine the interpretation based on counterexample results."""
         
@@ -318,35 +380,64 @@ Only output the JSON array, nothing else."""
         
         counterexample_summary = ""
         if fp_examples:
-            counterexample_summary += "\n\nFalse Positives (non-reasoning that activated):\n"
-            for ce in fp_examples[:3]:
-                counterexample_summary += f"- {ce.text[:150]}... (activation: {ce.max_activation:.1f})\n"
+            counterexample_summary += "\n\n### False Positives (NON-reasoning that DID activate):\n"
+            counterexample_summary += "These prove the feature activates on something other than reasoning:\n"
+            for ce in fp_examples[:5]:
+                counterexample_summary += f"- \"{ce.text[:180]}...\" (activation: {ce.max_activation:.1f})\n"
         
         if fn_examples:
-            counterexample_summary += "\n\nFalse Negatives (reasoning that didn't activate):\n"
-            for ce in fn_examples[:3]:
-                counterexample_summary += f"- {ce.text[:150]}... (activation: {ce.max_activation:.1f})\n"
+            counterexample_summary += "\n\n### False Negatives (REASONING that did NOT activate):\n"
+            counterexample_summary += "These prove the feature misses genuine reasoning:\n"
+            for ce in fn_examples[:5]:
+                counterexample_summary += f"- \"{ce.text[:180]}...\" (activation: {ce.max_activation:.1f})\n"
         
-        prompt = f"""Based on testing, we need to refine our understanding of this SAE feature.
+        # Build examples text with activating tokens
+        examples_text = "\n\n".join([
+            f"Example {i+1} (activation: {ex['max_activation']:.1f}):\n"
+            f"\"{ex['text'][:250]}...\"\n"
+            f"Activating tokens: {format_tokens_with_activations(ex.get('top_tokens', [])[:7])}"
+            for i, ex in enumerate(high_activation_examples[:3])
+        ])
+        
+        prompt = f"""Based on counterexample testing, provide a final interpretation of this SAE feature.
 
 ## Initial Hypothesis
 {initial_hypothesis}
 
-## Test Results
-Found {len(fp_examples)} non-reasoning texts that activated the feature (false positives)
-Found {len(fn_examples)} reasoning texts that didn't activate the feature (false negatives)
+## Top Tokens (ranked by mean activation)
+{', '.join([f'"{t.strip()}"' for t in top_tokens[:20]])}
+
+## Original High-Activation Examples (from reasoning dataset)
+{examples_text}
+
+## Counterexample Test Results
+- False positives found: {len(fp_examples)} (non-reasoning that activated)
+- False negatives found: {len(fn_examples)} (reasoning that didn't activate)
 {counterexample_summary}
 
-## Original High-Activation Examples (for reference)
-{high_activation_examples[0]['text'][:200]}...
+## Interpretation Guidelines
 
-## Task
-1. Provide a REFINED interpretation of what this feature actually detects (2-3 sentences)
-2. List 3-5 types of content this feature DOES activate on
-3. List 3-5 types of content this feature does NOT activate on
-4. Rate your confidence: HIGH, MEDIUM, or LOW
-5. Is this a genuine "reasoning" feature? YES or NO
-6. One-sentence summary
+A feature is a "genuine reasoning feature" ONLY if:
+1. It activates specifically on reasoning/thinking/deliberation
+2. It does NOT activate on non-reasoning content (few false positives)
+3. It activates on most types of reasoning (few false negatives)
+
+Common confounds that make a feature NOT a genuine reasoning feature:
+- Formal/academic writing style (activates on formal text regardless of reasoning)
+- Complex vocabulary (activates on sophisticated words regardless of reasoning)
+- Sentence structure/length (activates on complex sentences regardless of content)
+- Specific topics (activates on certain subjects, not reasoning process)
+- Discourse markers (activates on transition words that appear in many contexts)
+
+## Your Task
+Based on ALL the evidence above, provide:
+
+1. REFINED INTERPRETATION: What does this feature ACTUALLY detect? (2-3 sentences)
+2. ACTIVATES ON: List 3-5 specific types of content/patterns that activate this feature
+3. DOES NOT ACTIVATE ON: List 3-5 types of content that don't activate it
+4. CONFIDENCE: HIGH (clear pattern), MEDIUM (likely pattern), or LOW (unclear)
+5. IS GENUINE REASONING FEATURE: true ONLY if it specifically detects reasoning process, false if it's a confound
+6. SUMMARY: One sentence describing what this feature does
 
 Format as JSON:
 {{
@@ -389,6 +480,7 @@ Format as JSON:
             confidence=result.get("confidence", "LOW"),
             is_genuine_reasoning_feature=result.get("is_genuine_reasoning_feature", False),
             summary=result.get("summary", ""),
+            iterations_used=iterations_used,
         )
     
     def analyze_feature(
@@ -423,6 +515,7 @@ Format as JSON:
                 confidence="LOW",
                 is_genuine_reasoning_feature=False,
                 summary="Feature does not activate on the reasoning dataset",
+                iterations_used=0,
             )
         
         # Compute reference max activation from collected examples
@@ -439,6 +532,7 @@ Format as JSON:
         print(f"  Hypothesis: {hypothesis[:200]}...")
         
         all_counterexamples = []
+        iterations_used = 0
         
         for iteration in range(max_iterations):
             # Count current valid counterexamples
@@ -453,44 +547,53 @@ Format as JSON:
                 print(f"  (Required: {min_false_positives} FP and {min_false_negatives} FN)")
                 break
             
+            iterations_used = iteration + 1
+            
             print(f"\nIteration {iteration + 1}/{max_iterations}")
             print(f"  Current: {total_valid_fp}/{min_false_positives} FP, {total_valid_fn}/{min_false_negatives} FN")
             
-            # Step 3: Generate counterexamples
-            print("  Generating false positive candidates...")
-            fp_candidates = self.generate_counterexamples(
-                feature_index, hypothesis, examples, "false_positive"
-            )
+            # Step 3 & 4: Generate and test counterexamples (skip if already have enough)
+            need_fp = total_valid_fp < min_false_positives
+            need_fn = total_valid_fn < min_false_negatives
             
-            print("  Generating false negative candidates...")
-            fn_candidates = self.generate_counterexamples(
-                feature_index, hypothesis, examples, "false_negative"
-            )
+            if need_fp:
+                print("  Generating false positive candidates...")
+                fp_candidates = self.generate_counterexamples(
+                    feature_index, hypothesis, examples, top_tokens, "false_positive",
+                    previous_attempts=all_counterexamples
+                )
+                print(f"  Testing {len(fp_candidates)} false positive candidates...")
+                fp_results = self.test_counterexamples(
+                    feature_index, fp_candidates, "false_positive",
+                    reference_max_activation, threshold_ratio
+                )
+                valid_fp = sum(1 for ce in fp_results if ce.is_valid_counterexample)
+                print(f"    Valid counterexamples: {valid_fp}/{len(fp_results)}")
+                all_counterexamples.extend(fp_results)
+            else:
+                print(f"  Skipping false positives (already have {total_valid_fp}/{min_false_positives})")
             
-            # Step 4: Test counterexamples
-            print(f"  Testing {len(fp_candidates)} false positive candidates...")
-            fp_results = self.test_counterexamples(
-                feature_index, fp_candidates, "false_positive",
-                reference_max_activation, threshold_ratio
-            )
-            valid_fp = sum(1 for ce in fp_results if ce.is_valid_counterexample)
-            print(f"    Valid counterexamples: {valid_fp}/{len(fp_results)}")
-            
-            print(f"  Testing {len(fn_candidates)} false negative candidates...")
-            fn_results = self.test_counterexamples(
-                feature_index, fn_candidates, "false_negative",
-                reference_max_activation, threshold_ratio
-            )
-            valid_fn = sum(1 for ce in fn_results if ce.is_valid_counterexample)
-            print(f"    Valid counterexamples: {valid_fn}/{len(fn_results)}")
-            
-            all_counterexamples.extend(fp_results)
-            all_counterexamples.extend(fn_results)
+            if need_fn:
+                print("  Generating false negative candidates...")
+                fn_candidates = self.generate_counterexamples(
+                    feature_index, hypothesis, examples, top_tokens, "false_negative",
+                    previous_attempts=all_counterexamples
+                )
+                print(f"  Testing {len(fn_candidates)} false negative candidates...")
+                fn_results = self.test_counterexamples(
+                    feature_index, fn_candidates, "false_negative",
+                    reference_max_activation, threshold_ratio
+                )
+                valid_fn = sum(1 for ce in fn_results if ce.is_valid_counterexample)
+                print(f"    Valid counterexamples: {valid_fn}/{len(fn_results)}")
+                all_counterexamples.extend(fn_results)
+            else:
+                print(f"  Skipping false negatives (already have {total_valid_fn}/{min_false_negatives})")
         
         # Step 5: Refine interpretation
-        print("\nRefining interpretation...")
+        print(f"\nRefining interpretation (used {iterations_used} iterations)...")
         interpretation = self.refine_interpretation(
-            feature_index, hypothesis, all_counterexamples, examples
+            feature_index, hypothesis, all_counterexamples, examples, top_tokens, iterations_used
         )
         
         print(f"\n{'='*60}")
@@ -669,6 +772,8 @@ def main():
             results.append(asdict(interpretation))
             
             # Build summary
+            iterations_list = [r.get("iterations_used", 0) for r in results]
+            max_iterations_required = max(iterations_list) if iterations_list else 0
             summary = {
                 "total_features_analyzed": len(results),
                 "genuine_reasoning_features": sum(1 for r in results if r.get("is_genuine_reasoning_feature")),
@@ -678,6 +783,7 @@ def main():
                 "low_confidence": sum(1 for r in results if r.get("confidence") == "LOW"),
                 "total_false_positives": sum(len(r.get("false_positive_examples", [])) for r in results),
                 "total_false_negatives": sum(len(r.get("false_negative_examples", [])) for r in results),
+                "max_iterations_required": round(max_iterations_required, 2),
             }
             
             # Save intermediate results
@@ -709,6 +815,8 @@ def main():
     print("ANALYSIS COMPLETE")
     print("=" * 60)
     
+    iterations_list = [r.get("iterations_used", 0) for r in results]
+    max_iterations_required = max(iterations_list) if iterations_list else 0
     final_summary = {
         "total_features_analyzed": len(results),
         "genuine_reasoning_features": sum(1 for r in results if r.get("is_genuine_reasoning_feature")),
@@ -718,6 +826,7 @@ def main():
         "low_confidence": sum(1 for r in results if r.get("confidence") == "LOW"),
         "total_false_positives": sum(len(r.get("false_positive_examples", [])) for r in results),
         "total_false_negatives": sum(len(r.get("false_negative_examples", [])) for r in results),
+        "max_iterations_required": round(max_iterations_required, 2),
     }
     
     print(f"Total features analyzed: {final_summary['total_features_analyzed']}")
@@ -725,6 +834,7 @@ def main():
     print(f"Non-reasoning features: {final_summary['non_reasoning_features']}")
     print(f"Confidence: {final_summary['high_confidence']} HIGH, {final_summary['medium_confidence']} MEDIUM, {final_summary['low_confidence']} LOW")
     print(f"Total counterexamples: {final_summary['total_false_positives']} FP, {final_summary['total_false_negatives']} FN")
+    print(f"Max iterations required: {final_summary['max_iterations_required']}")
     print(f"\nResults saved to: {args.output}")
 
 
