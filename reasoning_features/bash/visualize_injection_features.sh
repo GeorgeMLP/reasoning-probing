@@ -5,7 +5,7 @@ for layer in 0 4 8 12 16 20 24; do
         --layer $layer \
         --n-features 100 \
         --n-examples 10 \
-        --max-seq-len 64 \
+        --max-seq-len 256 \
         --reasoning-dataset s1k \
         --output-dir visualizations/64maxlen/gemma-2-9b/s1k/layer$layer
     python reasoning_features/scripts/visualize_injection_features.py \
@@ -14,7 +14,7 @@ for layer in 0 4 8 12 16 20 24; do
         --layer $layer \
         --n-features 100 \
         --n-examples 10 \
-        --max-seq-len 64 \
+        --max-seq-len 256 \
         --reasoning-dataset general_inquiry_cot \
         --output-dir visualizations/64maxlen/gemma-2-9b/general_inquiry_cot/layer$layer
 done
