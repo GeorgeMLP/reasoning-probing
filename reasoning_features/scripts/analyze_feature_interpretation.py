@@ -152,10 +152,10 @@ class FeatureAnalyzer:
         """Collect examples of high activation with context."""
         examples = []
         
-        for text in reasoning_texts[:50]:
+        for text in reasoning_texts[:100]:
             max_act, mean_act, top_tokens = self.get_activation(text, feature_index)
             
-            if max_act > 5:
+            if max_act > 15:
                 examples.append({
                     "text": text[:500],
                     "max_activation": max_act,
@@ -386,7 +386,9 @@ Format as JSON:
         feature_index: int,
         reasoning_texts: list[str],
         top_tokens: list[str],
-        n_iterations: int = 2,
+        max_iterations: int = 2,
+        min_false_positives: int = 3,
+        min_false_negatives: int = 3,
     ) -> FeatureInterpretation:
         """Complete analysis of a single feature."""
         print(f"\n{'='*60}")
@@ -421,8 +423,21 @@ Format as JSON:
         
         all_counterexamples = []
         
-        for iteration in range(n_iterations):
-            print(f"\nIteration {iteration + 1}/{n_iterations}")
+        for iteration in range(max_iterations):
+            # Count current valid counterexamples
+            total_valid_fp = sum(1 for ce in all_counterexamples 
+                                 if ce.category == "false_positive" and ce.is_valid_counterexample)
+            total_valid_fn = sum(1 for ce in all_counterexamples 
+                                 if ce.category == "false_negative" and ce.is_valid_counterexample)
+            
+            # Check for early stopping
+            if total_valid_fp >= min_false_positives and total_valid_fn >= min_false_negatives:
+                print(f"\nEarly stopping: Found {total_valid_fp} false positives and {total_valid_fn} false negatives")
+                print(f"  (Required: {min_false_positives} FP and {min_false_negatives} FN)")
+                break
+            
+            print(f"\nIteration {iteration + 1}/{max_iterations}")
+            print(f"  Current: {total_valid_fp}/{min_false_positives} FP, {total_valid_fn}/{min_false_negatives} FN")
             
             # Step 3: Generate counterexamples
             print("  Generating false positive candidates...")
@@ -534,8 +549,12 @@ def main():
                         help="OpenRouter model to use for analysis")
     
     # Analysis configuration
-    parser.add_argument("--n-iterations", type=int, default=2,
-                        help="Number of counterexample generation iterations")
+    parser.add_argument("--max-iterations", type=int, default=5,
+                        help="Maximum counterexample generation iterations per feature")
+    parser.add_argument("--min-false-positives", type=int, default=3,
+                        help="Minimum false positives to find before stopping")
+    parser.add_argument("--min-false-negatives", type=int, default=3,
+                        help="Minimum false negatives to find before stopping")
     parser.add_argument("--max-features", type=int, default=20,
                         help="Maximum number of features to analyze")
     
@@ -621,18 +640,35 @@ def main():
                 feature_index,
                 reasoning_texts,
                 top_tokens,
-                n_iterations=args.n_iterations,
+                max_iterations=args.max_iterations,
+                min_false_positives=args.min_false_positives,
+                min_false_negatives=args.min_false_negatives,
             )
             results.append(asdict(interpretation))
+            
+            # Build summary
+            summary = {
+                "total_features_analyzed": len(results),
+                "genuine_reasoning_features": sum(1 for r in results if r.get("is_genuine_reasoning_feature")),
+                "non_reasoning_features": sum(1 for r in results if not r.get("is_genuine_reasoning_feature")),
+                "high_confidence": sum(1 for r in results if r.get("confidence") == "HIGH"),
+                "medium_confidence": sum(1 for r in results if r.get("confidence") == "MEDIUM"),
+                "low_confidence": sum(1 for r in results if r.get("confidence") == "LOW"),
+                "total_false_positives": sum(len(r.get("false_positive_examples", [])) for r in results),
+                "total_false_negatives": sum(len(r.get("false_negative_examples", [])) for r in results),
+            }
             
             # Save intermediate results
             with open(args.output, "w") as f:
                 json.dump({
+                    "summary": summary,
                     "config": {
                         "layer": args.layer,
                         "model": args.model_name,
                         "llm_model": args.llm_model,
-                        "n_iterations": args.n_iterations,
+                        "max_iterations": args.max_iterations,
+                        "min_false_positives": args.min_false_positives,
+                        "min_false_negatives": args.min_false_negatives,
                     },
                     "features": results,
                 }, f, indent=2)
@@ -650,9 +686,23 @@ def main():
     print("ANALYSIS COMPLETE")
     print("=" * 60)
     
-    genuine_count = sum(1 for r in results if r.get("is_genuine_reasoning_feature"))
-    print(f"Genuine reasoning features: {genuine_count}/{len(results)}")
-    print(f"Results saved to: {args.output}")
+    final_summary = {
+        "total_features_analyzed": len(results),
+        "genuine_reasoning_features": sum(1 for r in results if r.get("is_genuine_reasoning_feature")),
+        "non_reasoning_features": sum(1 for r in results if not r.get("is_genuine_reasoning_feature")),
+        "high_confidence": sum(1 for r in results if r.get("confidence") == "HIGH"),
+        "medium_confidence": sum(1 for r in results if r.get("confidence") == "MEDIUM"),
+        "low_confidence": sum(1 for r in results if r.get("confidence") == "LOW"),
+        "total_false_positives": sum(len(r.get("false_positive_examples", [])) for r in results),
+        "total_false_negatives": sum(len(r.get("false_negative_examples", [])) for r in results),
+    }
+    
+    print(f"Total features analyzed: {final_summary['total_features_analyzed']}")
+    print(f"Genuine reasoning features: {final_summary['genuine_reasoning_features']}")
+    print(f"Non-reasoning features: {final_summary['non_reasoning_features']}")
+    print(f"Confidence: {final_summary['high_confidence']} HIGH, {final_summary['medium_confidence']} MEDIUM, {final_summary['low_confidence']} LOW")
+    print(f"Total counterexamples: {final_summary['total_false_positives']} FP, {final_summary['total_false_negatives']} FN")
+    print(f"\nResults saved to: {args.output}")
 
 
 if __name__ == "__main__":
