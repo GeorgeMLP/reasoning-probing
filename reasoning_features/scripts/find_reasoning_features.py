@@ -114,6 +114,13 @@ def parse_args():
     
     # Feature detection parameters
     parser.add_argument(
+        "--feature-indices",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Optional list of feature indices to analyze (default: all)",
+    )
+    parser.add_argument(
         "--min-auc",
         type=float,
         default=0.6,
@@ -321,8 +328,11 @@ def main():
         score_weights=score_weights
     )
     
-    # Get all feature statistics
-    all_stats = detector.compute_all_stats(verbose=True)
+    # Get all feature statistics (or subset if feature_indices specified)
+    all_stats = detector.compute_all_stats(
+        verbose=True,
+        feature_indices=args.feature_indices,
+    )
     
     # Apply Bonferroni correction
     detector.apply_bonferroni_correction()
@@ -333,6 +343,7 @@ def main():
         max_p_value=args.max_pvalue,
         min_effect_size=args.min_effect_size,
         top_k=args.top_k_features,
+        feature_indices=args.feature_indices,
     )
     
     print(f"\nFound {len(reasoning_features)} reasoning features meeting criteria:")
@@ -383,7 +394,10 @@ def main():
     features_to_analyze = reasoning_features[:min(args.top_k_features, len(reasoning_features))]
     if not features_to_analyze:
         # If no features meet criteria, analyze top by score anyway
-        features_to_analyze = detector.get_top_features_by_score(args.top_k_features)
+        features_to_analyze = detector.get_top_features_by_score(
+            args.top_k_features,
+            feature_indices=args.feature_indices,
+        )
     
     print(f"\nAnalyzing token dependencies for {len(features_to_analyze)} features...")
     

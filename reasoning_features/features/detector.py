@@ -288,23 +288,39 @@ class ReasoningFeatureDetector:
         )
         return stats
     
-    def compute_all_stats(self, verbose: bool = True) -> list[FeatureStats]:
-        """Compute statistics for all features."""
-        if self._feature_stats is not None:
+    def compute_all_stats(
+        self, 
+        verbose: bool = True,
+        feature_indices: Optional[list[int]] = None,
+    ) -> list[FeatureStats]:
+        """Compute statistics for all features (or specified subset).
+        
+        Args:
+            verbose: Show progress bar
+            feature_indices: Optional list of feature indices to analyze. 
+                           If None, analyze all features.
+        """
+        if self._feature_stats is not None and feature_indices is None:
             return self._feature_stats
         
-        n_features = self.activations.n_features
+        if feature_indices is not None:
+            indices = feature_indices
+        else:
+            indices = list(range(self.activations.n_features))
+        
         stats = []
         
-        iterator = range(n_features)
+        iterator = indices
         if verbose:
             import tqdm
-            iterator = tqdm.tqdm(iterator, desc="Computing feature statistics")
+            iterator = tqdm.tqdm(indices, desc="Computing feature statistics")
         
         for i in iterator:
             stats.append(self.compute_feature_stats(i))
         
-        self._feature_stats = stats
+        # Only cache if we computed all features
+        if feature_indices is None:
+            self._feature_stats = stats
         return stats
     
     def get_reasoning_features(
@@ -313,6 +329,7 @@ class ReasoningFeatureDetector:
         max_p_value: float = 0.01,
         min_effect_size: float = 0.3,
         top_k: Optional[int] = None,
+        feature_indices: Optional[list[int]] = None,
     ) -> list[FeatureStats]:
         """
         Get features that qualify as reasoning features.
@@ -322,11 +339,12 @@ class ReasoningFeatureDetector:
             max_p_value: Maximum p-value for Mann-Whitney test
             min_effect_size: Minimum absolute Cohen's d
             top_k: If specified, return only top_k features by reasoning_score
+            feature_indices: Optional list of feature indices to consider
         
         Returns:
             List of FeatureStats for qualifying features, sorted by reasoning_score
         """
-        all_stats = self.compute_all_stats()
+        all_stats = self.compute_all_stats(feature_indices=feature_indices)
         
         # Filter by criteria
         reasoning_features = [
@@ -342,9 +360,13 @@ class ReasoningFeatureDetector:
         
         return reasoning_features
     
-    def get_top_features_by_score(self, top_k: int = 100) -> list[FeatureStats]:
+    def get_top_features_by_score(
+        self, 
+        top_k: int = 100,
+        feature_indices: Optional[list[int]] = None,
+    ) -> list[FeatureStats]:
         """Get top K features by reasoning score (regardless of thresholds)."""
-        all_stats = self.compute_all_stats()
+        all_stats = self.compute_all_stats(feature_indices=feature_indices)
         sorted_stats = sorted(all_stats, key=lambda x: x.reasoning_score, reverse=True)
         return sorted_stats[:top_k]
     
