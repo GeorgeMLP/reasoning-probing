@@ -139,6 +139,11 @@ def parse_args():
         help="Minimum Cohen's d effect size (default: 0.3)",
     )
     parser.add_argument(
+        "--no-filter",
+        action="store_true",
+        help="Skip threshold filtering; just rank by score and save top-k features",
+    )
+    parser.add_argument(
         "--top-k-features",
         type=int,
         default=100,
@@ -338,18 +343,25 @@ def main():
     detector.apply_bonferroni_correction(feature_indices=args.feature_indices)
     
     # Get reasoning features
-    reasoning_features = detector.get_reasoning_features(
-        min_auc=args.min_auc,
-        max_p_value=args.max_pvalue,
-        min_effect_size=args.min_effect_size,
-        top_k=args.top_k_features,
-        feature_indices=args.feature_indices,
-    )
-    
-    print(f"\nFound {len(reasoning_features)} reasoning features meeting criteria:")
-    print(f"  - ROC-AUC >= {args.min_auc}")
-    print(f"  - p-value <= {args.max_pvalue} (Bonferroni corrected)")
-    print(f"  - Cohen's d >= {args.min_effect_size}")
+    if args.no_filter:
+        # Skip threshold filtering, just rank by score
+        reasoning_features = detector.get_top_features_by_score(
+            top_k=args.top_k_features,
+            feature_indices=args.feature_indices,
+        )
+        print(f"\nTop {len(reasoning_features)} features by reasoning_score (no filtering):")
+    else:
+        reasoning_features = detector.get_reasoning_features(
+            min_auc=args.min_auc,
+            max_p_value=args.max_pvalue,
+            min_effect_size=args.min_effect_size,
+            top_k=args.top_k_features,
+            feature_indices=args.feature_indices,
+        )
+        print(f"\nFound {len(reasoning_features)} reasoning features meeting criteria:")
+        print(f"  - ROC-AUC >= {args.min_auc}")
+        print(f"  - p-value <= {args.max_pvalue} (Bonferroni corrected)")
+        print(f"  - Cohen's d >= {args.min_effect_size}")
     
     # Print summary
     summary = detector.summary(feature_indices=args.feature_indices)
@@ -453,18 +465,24 @@ def main():
         
         # Save reasoning features
         reasoning_path = args.save_dir / "reasoning_features.json"
+        config = {
+            "model_name": args.model_name,
+            "sae_name": args.sae_name,
+            "layer": args.layer,
+            "reasoning_dataset": args.reasoning_dataset,
+            "no_filter": args.no_filter,
+        }
+        if not args.no_filter:
+            config.update({
+                "min_auc": args.min_auc,
+                "max_pvalue": args.max_pvalue,
+                "min_effect_size": args.min_effect_size,
+            })
+        
         with open(reasoning_path, "w") as f:
             json.dump(
                 {
-                    "config": {
-                        "model_name": args.model_name,
-                        "sae_name": args.sae_name,
-                        "layer": args.layer,
-                        "reasoning_dataset": args.reasoning_dataset,
-                        "min_auc": args.min_auc,
-                        "max_pvalue": args.max_pvalue,
-                        "min_effect_size": args.min_effect_size,
-                    },
+                    "config": config,
                     "summary": summary,
                     "feature_indices": [s.feature_index for s in reasoning_features],
                     "features": [s.to_dict() for s in reasoning_features],
