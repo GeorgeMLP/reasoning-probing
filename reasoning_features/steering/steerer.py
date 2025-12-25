@@ -87,7 +87,10 @@ class FeatureSteerer:
         """
         self.model = model
         self.sae = sae
-        self.hook_name = sae.cfg.metadata.hook_name
+        try:
+            self.hook_name = sae.cfg.metadata.hook_name
+        except:
+            self.hook_name = sae.cfg.hook_name
         self._hooks_active = False
     
     def _create_steering_hook(
@@ -180,10 +183,15 @@ class FeatureSteerer:
             self._register_hook(config)
             
             # Tokenize
+            try:
+                device = self.model.cfg.device
+            except:
+                device = self.model.device
+            
             inputs = self.model.tokenizer(
                 prompt,
                 return_tensors="pt",
-            ).to(self.model.cfg.device)
+            ).to(device)
             
             # Generate
             with torch.no_grad():
@@ -219,10 +227,15 @@ class FeatureSteerer:
         """Generate text without any steering (baseline)."""
         self._clear_hooks()
         
+        try:
+            device = self.model.cfg.device
+        except:
+            device = self.model.device
+        
         inputs = self.model.tokenizer(
             prompt,
             return_tensors="pt",
-        ).to(self.model.cfg.device)
+        ).to(device)
         
         with torch.no_grad():
             outputs = self.model.generate(
@@ -312,10 +325,15 @@ class MultiLayerSteerer:
             # Use first steerer for generation (they share the model)
             first_steerer = list(self.steerers.values())[0]
             
+            try:
+                device = self.model.cfg.device
+            except:
+                device = self.model.device
+            
             inputs = self.model.tokenizer(
                 prompt,
                 return_tensors="pt",
-            ).to(self.model.cfg.device)
+            ).to(device)
             
             with torch.no_grad():
                 outputs = self.model.generate(

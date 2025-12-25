@@ -141,6 +141,8 @@ class FeatureCollector:
                 sae_id=sae_id,
                 device=self.device,
             )
+            if isinstance(self.sae, tuple):
+                self.sae = self.sae[0]
             self.current_layer = layer_index
     
     def tokenize_texts(
@@ -189,7 +191,10 @@ class FeatureCollector:
         all_activations = []
         n_samples = tokens.shape[0]
         
-        hook_name = self.sae.cfg.metadata.hook_name
+        try:
+            hook_name = self.sae.cfg.metadata.hook_name
+        except:
+            hook_name = self.sae.cfg.hook_name
         
         with tqdm.tqdm(total=n_samples, desc="Collecting activations") as pbar:
             for i in range(0, n_samples, batch_size):

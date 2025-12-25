@@ -348,7 +348,7 @@ Plot categories: `--only-layer-stats`, `--only-distributions`, `--only-token`, `
 
 ```bash
 conda create -n probing python=3.10
-bash setup.sh
+pip install -e .
 ```
 
 ## Quick Start

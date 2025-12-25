@@ -551,6 +551,8 @@ def main():
         sae_id=sae_id,
         device=args.device,
     )
+    if isinstance(sae, tuple):
+        sae = sae[0]
     
     tokenizer = model.tokenizer
     

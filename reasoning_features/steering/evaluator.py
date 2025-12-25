@@ -371,5 +371,7 @@ def load_model_and_sae(
         sae_id=sae_id,
         device=device,
     )
+    if isinstance(sae, tuple):
+        sae = sae[0]
     
     return model, sae
