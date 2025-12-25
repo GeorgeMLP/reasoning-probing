@@ -3,6 +3,9 @@ Benchmark evaluation for steering experiments.
 
 This module runs standardized evaluations on benchmarks with and without
 feature steering to measure the impact on reasoning performance.
+
+Steering uses the formula: x' = x + γ * f_max * W_dec[i]
+Where γ is the steering strength and f_max is the maximum feature activation.
 """
 
 from dataclasses import dataclass, field
@@ -75,6 +78,15 @@ class BenchmarkEvaluator:
     This class orchestrates running benchmarks with and without feature
     steering, allowing comparison of reasoning performance.
     
+    ## Steering Formula
+    
+    x' = x + γ * f_max * W_dec[i]
+    
+    Where:
+    - γ: Steering strength (gamma)
+    - f_max: Maximum activation of feature i
+    - W_dec[i]: Decoder direction for feature i
+    
     ## Usage
     
     ```python
@@ -83,8 +95,12 @@ class BenchmarkEvaluator:
     # Run baseline evaluation
     baseline = evaluator.evaluate("aime24", condition="baseline")
     
-    # Run steered evaluation
-    config = SteeringConfig(feature_indices=[42, 128], multiplier=2.0)
+    # Run steered evaluation for a single feature
+    config = SteeringConfig(
+        feature_index=42,
+        gamma=2.0,
+        max_feature_activation=15.0,
+    )
     steered = evaluator.evaluate("aime24", condition="steered", steering_config=config)
     
     # Compare
@@ -126,7 +142,7 @@ class BenchmarkEvaluator:
         Evaluate on a benchmark.
         
         Args:
-            benchmark_name: Name of benchmark ("aime24" or "gpqa_diamond")
+            benchmark_name: Name of benchmark ("aime24", "gpqa_diamond", "math500")
             condition: "baseline" or "steered"
             steering_config: Required if condition is "steered"
             max_new_tokens: Maximum tokens to generate
@@ -199,9 +215,9 @@ class BenchmarkEvaluator:
             expected=expected,
             is_correct=is_correct,
             steering_config={
-                "feature_indices": steering_config.feature_indices,
-                "multiplier": steering_config.multiplier,
-                "additive_value": steering_config.additive_value,
+                "feature_index": steering_config.feature_index,
+                "gamma": steering_config.gamma,
+                "max_feature_activation": steering_config.max_feature_activation,
                 "layer_index": steering_config.layer_index,
             } if steering_config else None,
             generation_params={
@@ -212,48 +228,51 @@ class BenchmarkEvaluator:
             },
         )
     
-    def run_steering_experiment(
+    def run_feature_steering_experiment(
         self,
         benchmark_name: str,
-        feature_indices: list[int],
-        multipliers: list[float] = [0.0, 0.5, 1.0, 2.0, 4.0],
+        feature_index: int,
+        max_feature_activation: float,
+        gamma_values: list[float] = [-2.0, -1.0, 0.0, 1.0, 2.0],
         max_new_tokens: int = 512,
         max_samples: Optional[int] = None,
         save_dir: Optional[Path] = None,
         verbose: bool = True,
     ) -> dict[float, EvaluationResult]:
         """
-        Run a steering experiment with multiple multiplier values.
+        Run a steering experiment for a single feature with multiple gamma values.
         
         Args:
             benchmark_name: Benchmark to evaluate
-            feature_indices: Features to steer
-            multipliers: List of multiplier values to test
+            feature_index: Single feature to steer
+            max_feature_activation: The f_max value for this feature
+            gamma_values: List of gamma values to test
             max_new_tokens: Max tokens for generation
             max_samples: Limit samples (for testing)
-            save_dir: Directory to save results
+            save_dir: Directory to save results (per-gamma)
             verbose: Show progress
         
         Returns:
-            Dict mapping multiplier -> EvaluationResult
+            Dict mapping gamma -> EvaluationResult
         """
         results = {}
         
-        for mult in multipliers:
-            if mult == 1.0:
-                # multiplier=1.0 is same as baseline
+        for gamma in gamma_values:
+            if gamma == 0.0:
+                # gamma=0.0 is same as baseline
                 condition = "baseline"
                 config = None
             else:
                 condition = "steered"
                 config = SteeringConfig(
-                    feature_indices=feature_indices,
-                    multiplier=mult,
+                    feature_index=feature_index,
+                    gamma=gamma,
+                    max_feature_activation=max_feature_activation,
                     layer_index=self.layer_index,
                 )
             
             if verbose:
-                print(f"\n=== Multiplier: {mult} ===")
+                print(f"\n=== Gamma: {gamma} ===")
             
             result = self.evaluate(
                 benchmark_name=benchmark_name,
@@ -264,82 +283,14 @@ class BenchmarkEvaluator:
                 verbose=verbose,
             )
             
-            results[mult] = result
+            results[gamma] = result
             
             if verbose:
                 print(f"Accuracy: {result.accuracy:.2%} ({result.correct}/{result.total})")
             
             if save_dir:
-                save_path = Path(save_dir) / f"result_mult_{mult:.2f}.json"
+                save_path = Path(save_dir) / f"result_gamma_{gamma:.2f}.json"
                 result.save(save_path)
-        
-        return results
-    
-    def compare_feature_sets(
-        self,
-        benchmark_name: str,
-        feature_sets: dict[str, list[int]],  # name -> feature_indices
-        multiplier: float = 2.0,
-        max_new_tokens: int = 512,
-        max_samples: Optional[int] = None,
-        verbose: bool = True,
-    ) -> dict[str, EvaluationResult]:
-        """
-        Compare performance when steering different feature sets.
-        
-        Args:
-            benchmark_name: Benchmark to evaluate
-            feature_sets: Dict mapping set name to feature indices
-            multiplier: Steering multiplier
-            max_new_tokens: Max tokens for generation
-            max_samples: Limit samples
-            verbose: Show progress
-        
-        Returns:
-            Dict mapping feature set name -> EvaluationResult
-        """
-        results = {}
-        
-        # First run baseline
-        if verbose:
-            print("\n=== Baseline (no steering) ===")
-        
-        baseline = self.evaluate(
-            benchmark_name=benchmark_name,
-            condition="baseline",
-            max_new_tokens=max_new_tokens,
-            max_samples=max_samples,
-            verbose=verbose,
-        )
-        results["baseline"] = baseline
-        
-        if verbose:
-            print(f"Accuracy: {baseline.accuracy:.2%}")
-        
-        # Run each feature set
-        for name, feature_indices in feature_sets.items():
-            if verbose:
-                print(f"\n=== Feature set: {name} ({len(feature_indices)} features) ===")
-            
-            config = SteeringConfig(
-                feature_indices=feature_indices,
-                multiplier=multiplier,
-                layer_index=self.layer_index,
-            )
-            
-            result = self.evaluate(
-                benchmark_name=benchmark_name,
-                condition="steered",
-                steering_config=config,
-                max_new_tokens=max_new_tokens,
-                max_samples=max_samples,
-                verbose=verbose,
-            )
-            results[name] = result
-            
-            if verbose:
-                delta = result.accuracy - baseline.accuracy
-                print(f"Accuracy: {result.accuracy:.2%} (Δ={delta:+.2%})")
         
         return results
 

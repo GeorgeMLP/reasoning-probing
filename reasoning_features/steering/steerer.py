@@ -1,12 +1,28 @@
 """
 Feature steering for SAE-based intervention experiments.
 
-This module implements activation steering by modifying SAE feature
-activations during model inference.
+This module implements activation steering by adding scaled decoder directions
+to the residual stream during model inference.
+
+## Steering Formula
+
+We use direct decoder direction steering:
+
+    x' = x + γ * f_max * W_dec[i]
+
+Where:
+- x: Original residual stream activation
+- γ: Steering strength (typically -4 to 4)
+- f_max: Maximum activation of feature i (pre-computed)
+- W_dec[i]: The i-th decoder direction (row of SAE decoder matrix)
+
+This approach directly modifies the residual stream by adding a scaled version
+of the decoder direction, rather than modifying feature activations through
+encode/decode.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Callable
+from typing import Callable
 import torch
 from torch import Tensor
 from jaxtyping import Float
@@ -16,53 +32,59 @@ from sae_lens import SAE, HookedSAETransformer
 
 @dataclass
 class SteeringConfig:
-    """Configuration for feature steering."""
+    """Configuration for feature steering.
     
-    # Features to steer (indices into SAE feature space)
-    feature_indices: list[int]
+    Attributes:
+        feature_index: Single feature index to steer
+        gamma: Steering strength (typically -4 to 4)
+        max_feature_activation: Maximum activation f_max for this feature
+        layer_index: Layer index to steer
+        start_position: Apply steering only after this token position
+    """
     
-    # Steering multiplier (>1 amplifies, <1 suppresses, 0 removes)
-    multiplier: float = 2.0
+    # Feature to steer (single index)
+    feature_index: int
     
-    # Alternative: add fixed value to activations
-    additive_value: Optional[float] = None
+    # Steering strength γ (typically -4 to 4)
+    # Positive values amplify, negative values suppress
+    gamma: float = 1.0
     
-    # Apply steering only after this token position
-    start_position: int = 0
+    # Maximum activation of this feature (f_max)
+    max_feature_activation: float = 1.0
     
     # Layer index to steer
     layer_index: int = 8
     
-    def __post_init__(self):
-        if not self.feature_indices:
-            raise ValueError("Must specify at least one feature to steer")
+    # Apply steering only after this token position
+    start_position: int = 0
 
 
 class FeatureSteerer:
     """
-    Steers model behavior by modifying SAE feature activations.
+    Steers model behavior by adding scaled decoder directions.
     
     This class hooks into the model's forward pass and modifies the
-    activations of specified SAE features, allowing us to test whether
-    amplifying "reasoning features" actually improves reasoning performance.
+    residual stream by adding a scaled decoder direction for the
+    specified feature.
     
-    ## Steering Methods
+    ## Steering Formula
     
-    1. **Multiplicative**: Multiply feature activations by a scalar
-       - multiplier > 1: Amplify the feature
-       - multiplier < 1: Suppress the feature
-       - multiplier = 0: Remove the feature entirely
+    x' = x + γ * f_max * W_dec[i]
     
-    2. **Additive**: Add a fixed value to feature activations
-       - Useful for features that may not be active
+    Where:
+    - x: Original residual stream activation [batch, seq, d_model]
+    - γ: Steering strength (config.gamma)
+    - f_max: Maximum activation (config.max_feature_activation)
+    - W_dec[i]: Decoder direction for feature i [d_model]
     
     ## Usage Example
     
     ```python
     steerer = FeatureSteerer(model, sae)
     config = SteeringConfig(
-        feature_indices=[42, 128, 256],
-        multiplier=2.0,
+        feature_index=42,
+        gamma=2.0,
+        max_feature_activation=15.0,
         layer_index=8,
     )
     
@@ -92,51 +114,35 @@ class FeatureSteerer:
         except:
             self.hook_name = sae.cfg.hook_name
         self._hooks_active = False
+        
+        # Get decoder matrix: shape (n_features, d_model)
+        self.W_dec = sae.W_dec.detach()
     
     def _create_steering_hook(
         self,
         config: SteeringConfig,
     ) -> Callable:
-        """Create a hook function that modifies SAE feature activations."""
+        """Create a hook function that adds scaled decoder direction."""
+        
+        # Pre-compute the steering vector: γ * f_max * W_dec[i]
+        # W_dec has shape (n_features, d_model)
+        decoder_direction = self.W_dec[config.feature_index]  # shape: (d_model,)
+        steering_vector = config.gamma * config.max_feature_activation * decoder_direction
         
         def steering_hook(
             activations: Float[Tensor, "batch seq d_model"],
             hook,
         ) -> Float[Tensor, "batch seq d_model"]:
-            """Hook that modifies activations via SAE encode/decode."""
-            # Get original shape
-            original_shape = activations.shape
-            batch_size, seq_len, d_model = original_shape
-            
-            # Encode through SAE
-            # Note: SAE expects [batch, d_model] so we need to reshape
-            flat_acts = activations.reshape(-1, d_model)
-            
-            # Get feature activations
-            feature_acts = self.sae.encode(flat_acts)
-            
-            # Apply steering to specified features
-            for feat_idx in config.feature_indices:
-                if config.additive_value is not None:
-                    # Additive steering
-                    feature_acts[:, feat_idx] += config.additive_value
-                else:
-                    # Multiplicative steering
-                    feature_acts[:, feat_idx] *= config.multiplier
-            
-            # Decode back to activation space
-            steered_acts = self.sae.decode(feature_acts)
-            
-            # Reshape back
-            steered_acts = steered_acts.reshape(original_shape)
-            
-            # Optionally only apply after start_position
+            """Hook that adds steering vector to residual stream."""
+            # Apply steering: x' = x + steering_vector
             if config.start_position > 0:
                 result = activations.clone()
-                result[:, config.start_position:] = steered_acts[:, config.start_position:]
+                result[:, config.start_position:] = (
+                    activations[:, config.start_position:] + steering_vector
+                )
                 return result
-            
-            return steered_acts
+            else:
+                return activations + steering_vector
         
         return steering_hook
     
@@ -277,76 +283,8 @@ class FeatureSteerer:
             "baseline": baseline,
             "steered": steered,
             "config": {
-                "feature_indices": config.feature_indices,
-                "multiplier": config.multiplier,
-                "additive_value": config.additive_value,
+                "feature_index": config.feature_index,
+                "gamma": config.gamma,
+                "max_feature_activation": config.max_feature_activation,
             },
         }
-
-
-class MultiLayerSteerer:
-    """
-    Steers features across multiple layers simultaneously.
-    
-    Useful for experiments that require coordinated steering
-    across the model's depth.
-    """
-    
-    def __init__(
-        self,
-        model: HookedSAETransformer,
-        saes: dict[int, SAE],  # layer_index -> SAE
-    ):
-        self.model = model
-        self.saes = saes
-        self.steerers = {
-            layer: FeatureSteerer(model, sae)
-            for layer, sae in saes.items()
-        }
-    
-    def generate_with_multi_layer_steering(
-        self,
-        prompt: str,
-        configs: dict[int, SteeringConfig],  # layer_index -> config
-        max_new_tokens: int = 256,
-        **generate_kwargs,
-    ) -> str:
-        """Generate with steering applied to multiple layers."""
-        # Clear all hooks first
-        for steerer in self.steerers.values():
-            steerer._clear_hooks()
-        
-        try:
-            # Register hooks for each layer
-            for layer, config in configs.items():
-                if layer in self.steerers:
-                    self.steerers[layer]._register_hook(config)
-            
-            # Use first steerer for generation (they share the model)
-            first_steerer = list(self.steerers.values())[0]
-            
-            try:
-                device = self.model.cfg.device
-            except:
-                device = self.model.device
-            
-            inputs = self.model.tokenizer(
-                prompt,
-                return_tensors="pt",
-            ).to(device)
-            
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    inputs["input_ids"],
-                    max_new_tokens=max_new_tokens,
-                    verbose=False,
-                    **generate_kwargs,
-                )
-            
-            prompt_length = inputs["input_ids"].shape[1]
-            generated = outputs[0, prompt_length:]
-            return self.model.tokenizer.decode(generated, skip_special_tokens=True)
-            
-        finally:
-            for steerer in self.steerers.values():
-                steerer._clear_hooks()

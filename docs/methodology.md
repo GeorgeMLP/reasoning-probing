@@ -218,20 +218,39 @@ python reasoning_features/scripts/run_anova_experiment.py \
 
 Test whether amplifying "reasoning features" actually improves performance on reasoning benchmarks. This provides causal evidence for whether features capture genuine reasoning.
 
-### 5.2 Multiplicative Steering
+### 5.2 Decoder Direction Steering
 
-We use multiplicative steering to scale feature activations:
+We use direct decoder direction steering to modify the residual stream:
 
-$$\tilde{f}_i = m \cdot f_i,$$
+$$x' = x + \gamma \cdot f_i^{\max} \cdot W_{\text{dec},i},$$
 
-where $m > 1$ amplifies and $m < 1$ suppresses the feature.
+where:
+- $x$ is the original residual stream activation (shape: `[batch, seq, d_model]`)
+- $\gamma$ is the steering strength (typically -4 to 4)
+- $f_i^{\max}$ is the maximum activation of feature $i$ (pre-computed from the dataset)
+- $W_{\text{dec},i}$ is the $i$-th row of the SAE decoder matrix (shape: `[d_model]`)
 
-**Why multiplicative:** 
-- Respects feature sparsity (only affects active positions)
-- Scale-appropriate (amplifies high activations more)
-- Interpretable ("2× amplification" has clear meaning)
+**Why decoder direction steering:**
+- **Direct intervention**: Adds the decoder direction without encode/decode roundtrip
+- **Scaled appropriately**: Uses maximum activation to scale the intervention magnitude
+- **Bidirectional**: Negative $\gamma$ suppresses, positive $\gamma$ amplifies
+- **Per-feature**: Each feature is steered individually to isolate effects
 
-### 5.3 Supported Benchmarks
+### 5.3 Per-Feature Evaluation
+
+Unlike previous approaches that steered all top-k features simultaneously, we now evaluate each feature individually:
+
+1. For each reasoning feature $i$:
+   - Compute $f_i^{\max}$ from the dataset
+   - Test multiple $\gamma$ values (e.g., -2, -1, 0, 1, 2)
+   - Measure benchmark accuracy for each $\gamma$
+   
+2. This allows:
+   - Identifying which specific features affect reasoning
+   - Distinguishing features with positive vs. negative effects
+   - Understanding individual feature contributions
+
+### 5.4 Supported Benchmarks
 
 | Benchmark | Task | Metric |
 |-----------|------|--------|
@@ -239,25 +258,37 @@ where $m > 1$ amplifies and $m < 1$ suppresses the feature.
 | GPQA Diamond | Graduate-level science MCQ | A/B/C/D accuracy |
 | MATH-500 | Diverse math problems | LLM-judged equivalence |
 
-### 5.4 Expected Results
+### 5.5 Expected Results
 
 **If features capture genuine reasoning:**
-- Amplification (m > 1) should improve accuracy
-- Suppression (m < 1) should decrease accuracy
+- Positive $\gamma$ should improve accuracy
+- Negative $\gamma$ should decrease accuracy
 
 **If features capture shallow patterns:**
-- Amplification may decrease accuracy (outputs look reasoning-like but aren't)
-- No consistent relationship between multiplier and performance
+- Positive $\gamma$ may decrease accuracy (outputs look reasoning-like but aren't)
+- No consistent relationship between $\gamma$ and performance
 
-### 5.5 Usage
+### 5.6 Output Structure
+
+Results are saved per-feature:
+```
+{save_dir}/{benchmark}/
+├── experiment_summary.json      # Overall summary with per_feature_results
+└── feature_{index}/
+    ├── feature_summary.json     # Per-feature summary
+    └── result_gamma_{value}.json  # Detailed results for each gamma
+```
+
+### 5.7 Usage
 
 ```bash
-# Run steering experiment
+# Run steering experiment (each feature individually)
 python reasoning_features/scripts/run_steering_experiment.py \
     --features-file results/layer8/reasoning_features.json \
     --benchmark aime24 \
-    --multipliers 0.0 0.5 1.0 2.0 4.0 \
-    --save-dir results/steering
+    --gamma-values -2 -1 0 1 2 \
+    --top-k-features 10 \
+    --save-dir results/layer8/aime24
 ```
 
 ---

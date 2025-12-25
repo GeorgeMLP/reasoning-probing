@@ -98,7 +98,10 @@ results/{setting}/{model}/{dataset}/layer{N}/
 ├── anova_results.json      # ANOVA analysis results
 ├── injection_results.json  # Token injection experiment results
 └── {benchmark}/            # Steering experiment results per benchmark
-    └── experiment_summary.json
+    ├── experiment_summary.json
+    └── feature_{index}/    # Per-feature results
+        ├── feature_summary.json
+        └── result_gamma_{value}.json
 ```
 
 Example: `results/initial-setting/gemma-2-9b/s1k/layer12/`
@@ -106,6 +109,22 @@ Example: `results/initial-setting/gemma-2-9b/s1k/layer12/`
 ## Experiment 2: Steering Experiments
 
 Test whether amplifying "reasoning features" actually improves performance on reasoning benchmarks.
+
+### Steering Formula
+
+We use decoder direction steering:
+
+```
+x' = x + γ * f_max * W_dec[i]
+```
+
+Where:
+- `x`: Original residual stream activation
+- `γ`: Steering strength (typically -4 to 4)
+- `f_max`: Maximum activation of feature i
+- `W_dec[i]`: Decoder direction for feature i
+
+Each feature is steered **individually** to isolate its effect on model behavior.
 
 ### Supported Benchmarks
 
@@ -115,45 +134,38 @@ Test whether amplifying "reasoning features" actually improves performance on re
 | **GPQA Diamond** | Graduate-level science MCQ (198) | A/B/C/D accuracy | `fingertap/GPQA-Diamond` |
 | **MATH-500** | Diverse math problems (500) | LLM-judged equivalence | Requires `OPENROUTER_API_KEY` |
 
-### Prompt Design
-
-The prompts are designed to allow the model to reason before providing its answer:
-
-1. **One-shot example**: Each prompt includes a worked example (not from the benchmark) demonstrating the expected format
-2. **Reasoning-friendly**: Models are asked to "show your reasoning step by step"
-3. **Boxed format**: Final answers should be in `\boxed{}` format for reliable extraction
-
-This design allows us to test whether steering "reasoning features" actually affects the model's reasoning process.
-
 ### Usage
 
 ```bash
-# Run steering experiment with detected features
+# Run steering experiment (each feature individually)
 python reasoning_features/scripts/run_steering_experiment.py \
     --features-file results/layer8/reasoning_features.json \
     --benchmark aime24 \
-    --multipliers 0.0 0.5 1.0 2.0 4.0 \
-    --save-dir results/steering_aime24
+    --gamma-values -2 -1 0 1 2 \
+    --top-k-features 10 \
+    --save-dir results/layer8/aime24
 
 # Run with specific feature indices
 python reasoning_features/scripts/run_steering_experiment.py \
-    --feature-indices 42 128 256 512 \
+    --feature-indices 42 128 256 \
     --benchmark gpqa_diamond \
-    --multipliers 0.5 1.0 2.0
+    --gamma-values -1 0 1 2
 
 # Run MATH-500 (requires OpenRouter API key)
 export OPENROUTER_API_KEY=your_key_here
 python reasoning_features/scripts/run_steering_experiment.py \
     --features-file results/layer8/reasoning_features.json \
     --benchmark math500 \
+    --gamma-values -2 0 2 \
     --max-samples 50 \
-    --save-dir results/steering_math500
+    --save-dir results/layer8/math500
 
-# Quick test (5 samples)
+# Quick test (5 samples, 2 features)
 python reasoning_features/scripts/run_steering_experiment.py \
     --features-file results/layer8/reasoning_features.json \
     --benchmark aime24 \
-    --max-samples 5
+    --max-samples 5 \
+    --top-k-features 2
 ```
 
 ### MATH-500 Benchmark
@@ -165,22 +177,33 @@ The MATH-500 benchmark (`HuggingFaceH4/MATH-500`) contains diverse math problems
 
 Because exact string matching would fail for equivalent expressions, we use an LLM judge (Gemini 2.0 Flash via OpenRouter) to evaluate mathematical equivalence. This requires setting the `OPENROUTER_API_KEY` environment variable.
 
-### Steering Multipliers
+### Steering Gamma Values
 
-| Multiplier | Effect |
-|------------|--------|
-| 0.0 | Remove feature entirely |
-| 0.5 | Suppress by 50% |
-| 1.0 | Baseline (no change) |
-| 2.0 | Amplify by 2x |
-| 4.0 | Amplify by 4x |
+| Gamma (γ) | Effect |
+|-----------|--------|
+| -2.0 | Strong suppression |
+| -1.0 | Mild suppression |
+| 0.0 | Baseline (no steering) |
+| 1.0 | Mild amplification |
+| 2.0 | Strong amplification |
+
+### Output Structure
+
+Results are saved per-feature:
+```
+{save_dir}/
+├── experiment_summary.json           # Overall summary
+└── feature_{index}/
+    ├── feature_summary.json          # Per-feature summary  
+    └── result_gamma_{value}.json     # Per-gamma detailed results
+```
 
 ### Interpreting Results
 
 | Observation | Interpretation |
 |-------------|----------------|
-| Amplification improves accuracy | Features may capture genuine reasoning |
-| Amplification hurts accuracy | Features capture spurious token correlations |
+| Positive γ improves accuracy | Features may capture genuine reasoning |
+| Positive γ hurts accuracy | Features capture spurious token correlations |
 | No significant change | Features not task-relevant |
 
 ## Datasets
@@ -361,10 +384,12 @@ python reasoning_features/scripts/find_reasoning_features.py \
     --nonreasoning-samples 200 \
     --save-dir results/quick_test
 
-# 2. Run steering experiment
+# 2. Run steering experiment (per-feature)
 python reasoning_features/scripts/run_steering_experiment.py \
     --features-file results/quick_test/reasoning_features.json \
     --benchmark gpqa_diamond \
+    --gamma-values -1 0 1 \
     --max-samples 10 \
+    --top-k-features 3 \
     --save-dir results/quick_steering
 ```

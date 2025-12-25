@@ -77,7 +77,7 @@ def load_experiment_data(experiment_dir: Path) -> dict:
             with open(fs_path) as f:
                 data['feature_stats'][layer_idx] = json.load(f)
         
-        # Load steering results
+        # Load steering results (per-feature structure)
         for benchmark in ['aime24', 'gpqa_diamond', 'math500']:
             benchmark_dir = layer_dir / benchmark
             if benchmark_dir.exists():
@@ -638,7 +638,11 @@ def plot_per_layer_scatter(data: dict, output_dir: Path):
 # =============================================================================
 
 def plot_steering_results(data: dict, output_dir: Path):
-    """Plot steering experiment results across layers."""
+    """Plot steering experiment results across layers (per-feature, gamma-based).
+    
+    New steering formula: x' = x + γ * f_max * W_dec[i]
+    Results are per-feature with gamma values instead of multipliers.
+    """
     steering_dir = output_dir / 'steering'
     steering_dir.mkdir(parents=True, exist_ok=True)
     
@@ -648,49 +652,164 @@ def plot_steering_results(data: dict, output_dir: Path):
     
     for benchmark in ['aime24', 'gpqa_diamond', 'math500']:
         layers_with_data = []
-        multipliers = set()
+        all_gamma_values = set()
+        all_feature_indices = set()
         results_by_layer = {}
         
         for layer, benchmarks in data['steering_results'].items():
             if benchmark in benchmarks:
                 layers_with_data.append(layer)
-                results = benchmarks[benchmark].get('results', {})
-                results_by_layer[layer] = results
-                multipliers.update(results.keys())
+                steering_data = benchmarks[benchmark]
+                
+                # New format: per_feature_results
+                per_feature = steering_data.get('per_feature_results', {})
+                if per_feature:
+                    results_by_layer[layer] = per_feature
+                    for feat_idx, gamma_results in per_feature.items():
+                        all_feature_indices.add(feat_idx)
+                        all_gamma_values.update(gamma_results.keys())
         
         if not layers_with_data:
             continue
         
-        multipliers = sorted([float(m) for m in multipliers])
+        gamma_values = sorted([float(g) for g in all_gamma_values])
+        feature_indices = sorted(all_feature_indices, key=lambda x: int(x))
         
+        if not gamma_values or not feature_indices:
+            print(f"  No per-feature steering results for {benchmark}")
+            continue
+        
+        # Plot 1: Average accuracy vs gamma across all features
         fig, ax = plt.subplots(figsize=(12, 6))
         
         x = np.arange(len(layers_with_data))
         width = 0.15
         
-        colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(multipliers)))
+        colors = plt.cm.RdYlGn(np.linspace(0.1, 0.9, len(gamma_values)))
         
-        for i, mult in enumerate(multipliers):
-            accuracies = []
+        for i, gamma in enumerate(gamma_values):
+            avg_accuracies = []
             for layer in layers_with_data:
-                acc = results_by_layer[layer].get(str(mult), {}).get('accuracy', 0)
-                accuracies.append(acc)
+                per_feature = results_by_layer.get(layer, {})
+                layer_accs = []
+                for feat_idx in feature_indices:
+                    if feat_idx in per_feature:
+                        acc = per_feature[feat_idx].get(str(gamma), {}).get('accuracy', 0)
+                        layer_accs.append(acc)
+                avg_acc = np.mean(layer_accs) if layer_accs else 0
+                avg_accuracies.append(avg_acc)
             
-            offset = (i - len(multipliers)/2 + 0.5) * width
-            ax.bar(x + offset, accuracies, width, label=f'mult={mult}', 
+            offset = (i - len(gamma_values)/2 + 0.5) * width
+            ax.bar(x + offset, avg_accuracies, width, label=f'γ={gamma}', 
                   color=colors[i], alpha=0.8)
         
         ax.set_xticks(x)
         ax.set_xticklabels([f'Layer {l}' for l in layers_with_data])
         ax.set_xlabel('Layer')
-        ax.set_ylabel('Accuracy')
-        ax.set_title(f'{benchmark.upper()}: Steering Results by Layer and Multiplier')
+        ax.set_ylabel('Average Accuracy')
+        ax.set_title(f'{benchmark.upper()}: Steering Results by Layer and Gamma (Avg across features)')
         ax.legend(loc='best')
         ax.set_ylim(0, 1)
         
         plt.tight_layout()
-        plt.savefig(steering_dir / f'{benchmark}_steering_results.png', bbox_inches='tight')
+        plt.savefig(steering_dir / f'{benchmark}_steering_by_gamma.png', bbox_inches='tight')
         plt.close()
+        
+        # Plot 2: Per-feature delta from baseline for each layer
+        for layer in layers_with_data:
+            per_feature = results_by_layer.get(layer, {})
+            if not per_feature:
+                continue
+            
+            fig, ax = plt.subplots(figsize=(14, 6))
+            
+            feat_list = sorted(per_feature.keys(), key=lambda x: int(x))
+            x = np.arange(len(feat_list))
+            width = 0.15
+            
+            # Compute baseline (gamma=0) for each feature
+            baseline_accs = {}
+            for feat_idx in feat_list:
+                baseline_accs[feat_idx] = per_feature[feat_idx].get('0.0', per_feature[feat_idx].get('0', {})).get('accuracy', 0)
+            
+            # Plot delta for each non-zero gamma
+            nonzero_gammas = [g for g in gamma_values if g != 0.0]
+            colors = plt.cm.RdYlGn(np.linspace(0.1, 0.9, len(nonzero_gammas)))
+            
+            for i, gamma in enumerate(nonzero_gammas):
+                deltas = []
+                for feat_idx in feat_list:
+                    acc = per_feature[feat_idx].get(str(gamma), {}).get('accuracy', 0)
+                    baseline = baseline_accs[feat_idx]
+                    deltas.append(acc - baseline)
+                
+                offset = (i - len(nonzero_gammas)/2 + 0.5) * width
+                ax.bar(x + offset, deltas, width, label=f'γ={gamma}', 
+                      color=colors[i], alpha=0.8)
+            
+            ax.axhline(0, color='black', linestyle='-', linewidth=0.5)
+            ax.set_xticks(x)
+            ax.set_xticklabels([f'F{f}' for f in feat_list], rotation=45, fontsize=8)
+            ax.set_xlabel('Feature Index')
+            ax.set_ylabel('Accuracy Delta (vs γ=0)')
+            ax.set_title(f'{benchmark.upper()} Layer {layer}: Per-Feature Steering Effect')
+            ax.legend(loc='best', fontsize=8)
+            
+            plt.tight_layout()
+            plt.savefig(steering_dir / f'{benchmark}_layer{layer}_per_feature.png', bbox_inches='tight')
+            plt.close()
+        
+        # Plot 3: Summary - number of features improved/degraded by positive gamma
+        if len(layers_with_data) > 0:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            improved_counts = []
+            degraded_counts = []
+            neutral_counts = []
+            
+            for layer in layers_with_data:
+                per_feature = results_by_layer.get(layer, {})
+                n_improved = 0
+                n_degraded = 0
+                n_neutral = 0
+                
+                for feat_idx, gamma_results in per_feature.items():
+                    baseline = gamma_results.get('0.0', gamma_results.get('0', {})).get('accuracy', 0)
+                    
+                    # Check positive gamma values
+                    for gamma in [g for g in gamma_values if g > 0]:
+                        acc = gamma_results.get(str(gamma), {}).get('accuracy', 0)
+                        delta = acc - baseline
+                        if delta > 0.02:
+                            n_improved += 1
+                            break
+                        elif delta < -0.02:
+                            n_degraded += 1
+                            break
+                    else:
+                        n_neutral += 1
+                
+                improved_counts.append(n_improved)
+                degraded_counts.append(n_degraded)
+                neutral_counts.append(n_neutral)
+            
+            x = np.arange(len(layers_with_data))
+            width = 0.25
+            
+            ax.bar(x - width, improved_counts, width, label='Improved (>2%)', color='#55A868', alpha=0.8)
+            ax.bar(x, neutral_counts, width, label='Neutral', color='#8C8C8C', alpha=0.8)
+            ax.bar(x + width, degraded_counts, width, label='Degraded (<-2%)', color='#C44E52', alpha=0.8)
+            
+            ax.set_xticks(x)
+            ax.set_xticklabels([f'Layer {l}' for l in layers_with_data])
+            ax.set_xlabel('Layer')
+            ax.set_ylabel('Number of Features')
+            ax.set_title(f'{benchmark.upper()}: Feature Response to Positive γ Steering')
+            ax.legend(loc='best')
+            
+            plt.tight_layout()
+            plt.savefig(steering_dir / f'{benchmark}_steering_summary.png', bbox_inches='tight')
+            plt.close()
 
 
 # =============================================================================
