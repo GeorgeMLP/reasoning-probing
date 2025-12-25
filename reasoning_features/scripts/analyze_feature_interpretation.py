@@ -155,7 +155,7 @@ class FeatureAnalyzer:
         for text in reasoning_texts[:100]:
             max_act, mean_act, top_tokens = self.get_activation(text, feature_index)
             
-            if max_act > 15:
+            if max_act > 5:
                 examples.append({
                     "text": text[:500],
                     "max_activation": max_act,
@@ -266,10 +266,20 @@ Only output the JSON array, nothing else."""
         feature_index: int,
         candidates: list[str],
         category: str,
-        activation_threshold: float = 15.0,
+        reference_max_activation: float,
+        threshold_ratio: float = 0.5,
     ) -> list[CounterExample]:
-        """Test counterexample candidates against the model."""
+        """Test counterexample candidates against the model.
+        
+        Args:
+            feature_index: The feature to test
+            candidates: List of candidate texts
+            category: 'false_positive' or 'false_negative'
+            reference_max_activation: The max activation from high-activation examples
+            threshold_ratio: Percentage of reference_max to use as threshold (0-1)
+        """
         results = []
+        activation_threshold = reference_max_activation * threshold_ratio
         
         for text in candidates:
             max_act, mean_act, top_tokens = self.get_activation(text, feature_index)
@@ -289,7 +299,7 @@ Only output the JSON array, nothing else."""
                 expected_reasoning=expected_reasoning,
                 max_activation=max_act,
                 is_valid_counterexample=is_valid,
-                explanation=f"Max activation: {max_act:.2f}, threshold: {activation_threshold}",
+                explanation=f"Max activation: {max_act:.2f}, threshold: {activation_threshold:.2f} ({threshold_ratio*100:.0f}% of {reference_max_activation:.2f})",
             ))
         
         return results
@@ -389,6 +399,7 @@ Format as JSON:
         max_iterations: int = 2,
         min_false_positives: int = 3,
         min_false_negatives: int = 3,
+        threshold_ratio: float = 0.5,
     ) -> FeatureInterpretation:
         """Complete analysis of a single feature."""
         print(f"\n{'='*60}")
@@ -414,7 +425,13 @@ Format as JSON:
                 summary="Feature does not activate on the reasoning dataset",
             )
         
+        # Compute reference max activation from collected examples
+        reference_max_activation = max(ex["max_activation"] for ex in examples)
+        activation_threshold = reference_max_activation * threshold_ratio
+        
         print(f"  Found {len(examples)} high-activation examples")
+        print(f"  Reference max activation: {reference_max_activation:.2f}")
+        print(f"  Threshold: {activation_threshold:.2f} ({threshold_ratio*100:.0f}% of max)")
         
         # Step 2: Generate initial hypothesis
         print("Step 2: Generating hypothesis...")
@@ -453,14 +470,16 @@ Format as JSON:
             # Step 4: Test counterexamples
             print(f"  Testing {len(fp_candidates)} false positive candidates...")
             fp_results = self.test_counterexamples(
-                feature_index, fp_candidates, "false_positive"
+                feature_index, fp_candidates, "false_positive",
+                reference_max_activation, threshold_ratio
             )
             valid_fp = sum(1 for ce in fp_results if ce.is_valid_counterexample)
             print(f"    Valid counterexamples: {valid_fp}/{len(fp_results)}")
             
             print(f"  Testing {len(fn_candidates)} false negative candidates...")
             fn_results = self.test_counterexamples(
-                feature_index, fn_candidates, "false_negative"
+                feature_index, fn_candidates, "false_negative",
+                reference_max_activation, threshold_ratio
             )
             valid_fn = sum(1 for ce in fn_results if ce.is_valid_counterexample)
             print(f"    Valid counterexamples: {valid_fn}/{len(fn_results)}")
@@ -555,6 +574,8 @@ def main():
                         help="Minimum false positives to find before stopping")
     parser.add_argument("--min-false-negatives", type=int, default=3,
                         help="Minimum false negatives to find before stopping")
+    parser.add_argument("--threshold-ratio", type=float, default=0.5,
+                        help="Activation threshold as ratio of max activation (0-1, default: 0.5)")
     parser.add_argument("--max-features", type=int, default=20,
                         help="Maximum number of features to analyze")
     
@@ -643,6 +664,7 @@ def main():
                 max_iterations=args.max_iterations,
                 min_false_positives=args.min_false_positives,
                 min_false_negatives=args.min_false_negatives,
+                threshold_ratio=args.threshold_ratio,
             )
             results.append(asdict(interpretation))
             
@@ -669,6 +691,7 @@ def main():
                         "max_iterations": args.max_iterations,
                         "min_false_positives": args.min_false_positives,
                         "min_false_negatives": args.min_false_negatives,
+                        "threshold_ratio": args.threshold_ratio,
                     },
                     "features": results,
                 }, f, indent=2)
