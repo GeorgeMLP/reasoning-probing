@@ -47,6 +47,7 @@ def load_experiment_data(experiment_dir: Path) -> dict:
         'feature_stats': {},
         'steering_results': {},
         'injection_results': {},
+        'interpretation_results': {},
     }
     
     # Find all layer directories
@@ -92,6 +93,12 @@ def load_experiment_data(experiment_dir: Path) -> dict:
         if injection_path.exists():
             with open(injection_path) as f:
                 data['injection_results'][layer_idx] = json.load(f)
+        
+        # Load feature interpretation results
+        interp_path = layer_dir / 'feature_interpretations.json'
+        if interp_path.exists():
+            with open(interp_path) as f:
+                data['interpretation_results'][layer_idx] = json.load(f)
     
     return data
 
@@ -1298,6 +1305,140 @@ def plot_injection_activation_comparison(data: dict, output_dir: Path):
 
 
 # =============================================================================
+# Feature Interpretation Plots
+# =============================================================================
+
+def plot_interpretation_summary(data: dict, output_dir: Path):
+    """Plot LLM feature interpretation results summary."""
+    interp_dir = output_dir / 'interpretation'
+    interp_dir.mkdir(parents=True, exist_ok=True)
+    
+    if not data.get('interpretation_results'):
+        print("  No interpretation results found")
+        return
+    
+    layers = sorted(data['interpretation_results'].keys())
+    
+    # Collect summary statistics per layer
+    metrics = {
+        'genuine_reasoning': [],
+        'non_reasoning': [],
+        'high_confidence': [],
+        'medium_confidence': [],
+        'low_confidence': [],
+    }
+    
+    for layer in layers:
+        interp = data['interpretation_results'].get(layer, {})
+        summary = interp.get('summary', {})
+        
+        metrics['genuine_reasoning'].append(summary.get('genuine_reasoning_features', 0))
+        metrics['non_reasoning'].append(summary.get('non_reasoning_features', 0))
+        metrics['high_confidence'].append(summary.get('high_confidence', 0))
+        metrics['medium_confidence'].append(summary.get('medium_confidence', 0))
+        metrics['low_confidence'].append(summary.get('low_confidence', 0))
+    
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # Plot 1: Genuine vs Non-Reasoning Features
+    ax = axes[0]
+    x = np.arange(len(layers))
+    width = 0.35
+    
+    ax.bar(x - width/2, metrics['genuine_reasoning'], width, 
+           label='Genuine Reasoning', color='#55A868', alpha=0.8)
+    ax.bar(x + width/2, metrics['non_reasoning'], width,
+           label='Non-Reasoning (Confound)', color='#C44E52', alpha=0.8)
+    
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'L{l}' for l in layers])
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Number of Features')
+    ax.set_title('LLM Feature Classification: Genuine vs Confound')
+    ax.legend()
+    
+    # Add value labels
+    for i, (g, n) in enumerate(zip(metrics['genuine_reasoning'], metrics['non_reasoning'])):
+        if g > 0:
+            ax.text(i - width/2, g + 0.1, str(g), ha='center', fontsize=9)
+        if n > 0:
+            ax.text(i + width/2, n + 0.1, str(n), ha='center', fontsize=9)
+    
+    # Plot 2: Confidence Distribution
+    ax = axes[1]
+    width = 0.25
+    
+    ax.bar(x - width, metrics['high_confidence'], width,
+           label='HIGH', color='#55A868', alpha=0.8)
+    ax.bar(x, metrics['medium_confidence'], width,
+           label='MEDIUM', color='#DD8452', alpha=0.8)
+    ax.bar(x + width, metrics['low_confidence'], width,
+           label='LOW', color='#C44E52', alpha=0.8)
+    
+    ax.set_xticks(x)
+    ax.set_xticklabels([f'L{l}' for l in layers])
+    ax.set_xlabel('Layer')
+    ax.set_ylabel('Number of Features')
+    ax.set_title('LLM Interpretation Confidence')
+    ax.legend()
+    
+    plt.tight_layout()
+    plt.savefig(interp_dir / 'interpretation_summary.png', bbox_inches='tight')
+    plt.close()
+
+
+def plot_interpretation_per_layer(data: dict, output_dir: Path):
+    """Plot interpretation results for each layer."""
+    interp_dir = output_dir / 'interpretation'
+    interp_dir.mkdir(parents=True, exist_ok=True)
+    
+    if not data.get('interpretation_results'):
+        return
+    
+    for layer, interp_data in sorted(data['interpretation_results'].items()):
+        features = interp_data.get('features', [])
+        if not features:
+            continue
+        
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        
+        # Classification pie chart
+        ax = axes[0]
+        genuine_count = sum(1 for f in features if f.get('is_genuine_reasoning_feature'))
+        confound_count = len(features) - genuine_count
+        
+        if genuine_count > 0 or confound_count > 0:
+            labels = ['Genuine Reasoning', 'Confound']
+            sizes = [genuine_count, confound_count]
+            colors = ['#55A868', '#C44E52']
+            ax.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', 
+                   startangle=90, explode=(0.02, 0))
+            ax.set_title('Feature Classification')
+        
+        # Confidence pie chart
+        ax = axes[1]
+        conf_counts = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+        for f in features:
+            conf = f.get('confidence', 'LOW')
+            if conf in conf_counts:
+                conf_counts[conf] += 1
+        
+        labels = list(conf_counts.keys())
+        sizes = list(conf_counts.values())
+        colors = ['#55A868', '#DD8452', '#C44E52']
+        
+        # Only plot if there's data
+        if sum(sizes) > 0:
+            ax.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+            ax.set_title('Interpretation Confidence')
+        
+        plt.suptitle(f'Layer {layer}: LLM Feature Interpretation Results', fontsize=14)
+        plt.tight_layout()
+        plt.savefig(interp_dir / f'layer{layer}_interpretation.png', bbox_inches='tight')
+        plt.close()
+
+
+# =============================================================================
 # Summary Plot
 # =============================================================================
 
@@ -1393,6 +1534,7 @@ def process_experiment(experiment_dir: Path, plots_dir: Path,
                        plot_steering: bool = True,
                        plot_anova_: bool = True,
                        plot_injection_: bool = True,
+                       plot_interpretation_: bool = True,
                        plot_summary_: bool = True):
     """Process a single experiment and generate all plots.
     
@@ -1458,6 +1600,12 @@ def process_experiment(experiment_dir: Path, plots_dir: Path,
             plot_injection_summary(data, output_dir)
             plot_injection_per_feature(data, output_dir)
             plot_injection_activation_comparison(data, output_dir)
+    
+    if plot_interpretation_:
+        if data.get('interpretation_results'):
+            print("  Generating interpretation plots...")
+            plot_interpretation_summary(data, output_dir)
+            plot_interpretation_per_layer(data, output_dir)
     
     if plot_summary_:
         print("  Generating summary plot...")
@@ -1546,6 +1694,11 @@ def parse_args():
         help='Only generate injection experiment plots',
     )
     parser.add_argument(
+        '--only-interpretation',
+        action='store_true',
+        help='Only generate LLM interpretation plots',
+    )
+    parser.add_argument(
         '--only-summary',
         action='store_true',
         help='Only generate summary plot',
@@ -1588,6 +1741,11 @@ def parse_args():
         help='Skip injection experiment plots',
     )
     parser.add_argument(
+        '--no-interpretation',
+        action='store_true',
+        help='Skip LLM interpretation plots',
+    )
+    parser.add_argument(
         '--no-summary',
         action='store_true',
         help='Skip summary plot',
@@ -1606,7 +1764,7 @@ def main():
     # Determine which plots to generate
     only_flags = [args.only_layer_stats, args.only_distributions, args.only_token,
                   args.only_scatter, args.only_steering, args.only_anova, 
-                  args.only_injection, args.only_summary]
+                  args.only_injection, args.only_interpretation, args.only_summary]
     
     if any(only_flags):
         # Only specified categories
@@ -1617,6 +1775,7 @@ def main():
         plot_steering = args.only_steering
         plot_anova = args.only_anova
         plot_injection = args.only_injection
+        plot_interpretation = args.only_interpretation
         plot_summary = args.only_summary
     else:
         # All categories except excluded
@@ -1627,6 +1786,7 @@ def main():
         plot_steering = not args.no_steering
         plot_anova = not args.no_anova
         plot_injection = not args.no_injection
+        plot_interpretation = not args.no_interpretation
         plot_summary = not args.no_summary
     
     print(f"\nPlot categories enabled:")
@@ -1637,6 +1797,7 @@ def main():
     print(f"  Steering results: {plot_steering}")
     print(f"  ANOVA: {plot_anova}")
     print(f"  Injection: {plot_injection}")
+    print(f"  Interpretation: {plot_interpretation}")
     print(f"  Summary: {plot_summary}")
     
     # Find experiments
@@ -1669,6 +1830,7 @@ def main():
             plot_steering=plot_steering,
             plot_anova_=plot_anova,
             plot_injection_=plot_injection,
+            plot_interpretation_=plot_interpretation,
             plot_summary_=plot_summary,
         )
     
