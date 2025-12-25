@@ -370,9 +370,17 @@ class ReasoningFeatureDetector:
         sorted_stats = sorted(all_stats, key=lambda x: x.reasoning_score, reverse=True)
         return sorted_stats[:top_k]
     
-    def apply_bonferroni_correction(self) -> list[FeatureStats]:
-        """Apply Bonferroni correction to p-values."""
-        all_stats = self.compute_all_stats()
+    def apply_bonferroni_correction(
+        self,
+        feature_indices: Optional[list[int]] = None,
+    ) -> list[FeatureStats]:
+        """Apply Bonferroni correction to p-values.
+        
+        Args:
+            feature_indices: Optional list of feature indices to consider.
+                           If None, use all features.
+        """
+        all_stats = self.compute_all_stats(feature_indices=feature_indices)
         n_tests = len(all_stats)
         
         for stat in all_stats:
@@ -381,15 +389,23 @@ class ReasoningFeatureDetector:
         
         return all_stats
     
-    def summary(self) -> dict:
-        """Generate summary statistics about detected reasoning features."""
-        all_stats = self.compute_all_stats()
-        reasoning_features = self.get_reasoning_features()
+    def summary(
+        self,
+        feature_indices: Optional[list[int]] = None,
+    ) -> dict:
+        """Generate summary statistics about detected reasoning features.
+        
+        Args:
+            feature_indices: Optional list of feature indices to consider.
+                           If None, use all features.
+        """
+        all_stats = self.compute_all_stats(feature_indices=feature_indices)
+        reasoning_features = self.get_reasoning_features(feature_indices=feature_indices)
         
         return {
             "total_features": len(all_stats),
             "reasoning_features_count": len(reasoning_features),
-            "percentage_reasoning": len(reasoning_features) / len(all_stats) * 100,
+            "percentage_reasoning": len(reasoning_features) / len(all_stats) * 100 if all_stats else 0,
             "top_10_features": [s.feature_index for s in reasoning_features[:10]],
             "top_10_scores": [s.reasoning_score for s in reasoning_features[:10]],
             "mean_auc_reasoning_features": np.mean([s.roc_auc for s in reasoning_features]) if reasoning_features else 0,

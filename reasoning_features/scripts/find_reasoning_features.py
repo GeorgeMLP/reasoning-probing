@@ -335,7 +335,7 @@ def main():
     )
     
     # Apply Bonferroni correction
-    detector.apply_bonferroni_correction()
+    detector.apply_bonferroni_correction(feature_indices=args.feature_indices)
     
     # Get reasoning features
     reasoning_features = detector.get_reasoning_features(
@@ -352,7 +352,7 @@ def main():
     print(f"  - Cohen's d >= {args.min_effect_size}")
     
     # Print summary
-    summary = detector.summary()
+    summary = detector.summary(feature_indices=args.feature_indices)
     print(f"\n--- Summary ---")
     print(f"Total features analyzed: {summary['total_features']}")
     print(f"Reasoning features found: {summary['reasoning_features_count']} ({summary['percentage_reasoning']:.1f}%)")
