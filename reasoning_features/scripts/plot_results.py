@@ -1067,6 +1067,8 @@ def plot_injection_summary(data: dict, output_dir: Path):
         'avg_transfer_ratio': [],
         'pct_token_driven': [],
         'pct_partially_driven': [],
+        'pct_weakly_driven': [],
+        'pct_context_dependent': [],
         'avg_baseline_activation': [],
         'avg_reasoning_activation': [],
     }
@@ -1083,8 +1085,12 @@ def plot_injection_summary(data: dict, output_dir: Path):
         
         pct_token = 100 * counts.get('token_driven', 0) / n_features if n_features > 0 else 0
         pct_partial = 100 * counts.get('partially_token_driven', 0) / n_features if n_features > 0 else 0
+        pct_weak = 100 * counts.get('weakly_token_driven', 0) / n_features if n_features > 0 else 0
+        pct_context = 100 * counts.get('context_dependent', 0) / n_features if n_features > 0 else 0
         metrics['pct_token_driven'].append(pct_token)
         metrics['pct_partially_driven'].append(pct_partial)
+        metrics['pct_weakly_driven'].append(pct_weak)
+        metrics['pct_context_dependent'].append(pct_context)
     
     # Plot 1: Transfer ratio and token-driven percentages
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -1102,23 +1108,26 @@ def plot_injection_summary(data: dict, output_dir: Path):
     for i, v in enumerate(metrics['avg_transfer_ratio']):
         ax.text(i, v + 0.02, f'{v:.2f}', ha='center', fontsize=9)
     
-    # Percentage token-driven
+    # Percentage by classification
     ax = axes[1]
     x = np.arange(len(layers))
-    width = 0.35
-    ax.bar(x - width/2, metrics['pct_token_driven'], width, label='Token-driven', color='#C44E52', alpha=0.8)
-    ax.bar(x + width/2, metrics['pct_partially_driven'], width, label='Partially token-driven', color='#DD8452', alpha=0.8)
+    width = 0.2
+    ax.bar(x - 1.5*width, metrics['pct_token_driven'], width, label='Token-driven', color='#C44E52', alpha=0.8)
+    ax.bar(x - 0.5*width, metrics['pct_partially_driven'], width, label='Partially token-driven', color='#DD8452', alpha=0.8)
+    ax.bar(x + 0.5*width, metrics['pct_weakly_driven'], width, label='Weakly token-driven', color='#55A868', alpha=0.8)
+    ax.bar(x + 1.5*width, metrics['pct_context_dependent'], width, label='Context dependent', color='#4C72B0', alpha=0.8)
     ax.set_xticks(x)
     ax.set_xticklabels([f'L{l}' for l in layers])
     ax.set_xlabel('Layer')
     ax.set_ylabel('Percentage of Features (%)')
     ax.set_title('Feature Classification by Token Dependency')
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=7, loc='upper right')
     
     # Activation comparison
     ax = axes[2]
-    ax.bar(x - width/2, metrics['avg_baseline_activation'], width, label='Baseline', color='#4C72B0', alpha=0.8)
-    ax.bar(x + width/2, metrics['avg_reasoning_activation'], width, label='Reasoning', color='#55A868', alpha=0.8)
+    width_act = 0.35
+    ax.bar(x - width_act/2, metrics['avg_baseline_activation'], width_act, label='Baseline', color='#4C72B0', alpha=0.8)
+    ax.bar(x + width_act/2, metrics['avg_reasoning_activation'], width_act, label='Reasoning', color='#55A868', alpha=0.8)
     ax.set_xticks(x)
     ax.set_xticklabels([f'L{l}' for l in layers])
     ax.set_xlabel('Layer')
