@@ -218,12 +218,43 @@ def load_top_tokens_for_feature(
     return []
 
 
+def load_top_ngrams_for_feature(
+    token_analysis_path: str,
+    feature_index: int,
+    n: int = 2,
+    top_k: int = 10,
+) -> list[str]:
+    """Load top-k n-grams (as concatenated strings) for a specific feature.
+    
+    Args:
+        token_analysis_path: Path to token_analysis.json
+        feature_index: Index of the feature
+        n: N-gram size (2 for bigram, 3 for trigram)
+        top_k: Number of top n-grams to return
+        
+    Returns:
+        List of n-gram strings (concatenated tokens)
+    """
+    with open(token_analysis_path) as f:
+        data = json.load(f)
+    
+    key = "top_bigrams" if n == 2 else "top_trigrams"
+    
+    for feature in data.get("features", []):
+        if feature.get("feature_index") == feature_index:
+            ngrams = feature.get(key, [])[:top_k]
+            return [ng["ngram_str"] for ng in ngrams]
+    
+    return []
+
+
 def inject_tokens_into_text(
     text: str,
     tokens: list[str],
     n_inject: int = 3,
     strategy: str = "prepend",
     token_contexts: Optional[dict[str, dict[str, list[str]]]] = None,
+    ngrams: Optional[list[str]] = None,
 ) -> str:
     """Inject tokens into text using various strategies.
     
@@ -234,6 +265,7 @@ def inject_tokens_into_text(
         strategy: Injection strategy (see below)
         token_contexts: Optional dict mapping token -> {"before": [...], "after": [...]}
                        Required for contextual strategies
+        ngrams: Optional list of n-gram strings for inject_bigram/inject_trigram strategies
         
     Simple strategies (use n_inject):
         - prepend: Add tokens at the beginning
@@ -241,7 +273,11 @@ def inject_tokens_into_text(
         - intersperse: Spread tokens throughout
         - replace: Replace random words
         
-    Contextual strategies (use n_inject):
+    N-gram injection strategies (use n_inject_bigram/n_inject_trigram):
+        - inject_bigram: Inject top bigrams from analysis
+        - inject_trigram: Inject top trigrams from analysis
+        
+    Contextual strategies:
         - bigram_before: Inject [context_word, target_token] pairs
         - bigram_after: Inject [target_token, context_word] pairs
         - trigram: Inject [before, target_token, after] triplets
@@ -276,6 +312,30 @@ def inject_tokens_into_text(
         positions = random.sample(range(len(words)), len(selected_tokens))
         for pos, token in zip(positions, selected_tokens):
             words[pos] = token
+        return " ".join(words)
+    
+    # N-gram injection strategies (use pre-computed ngrams from analysis)
+    elif strategy == "inject_bigram":
+        if not ngrams:
+            # Fallback to simple prepend
+            return " ".join(selected_tokens) + " " + text
+        selected_ngrams = random.sample(ngrams, min(n_inject, len(ngrams)))
+        if len(words) < 2:
+            return " ".join(selected_ngrams) + " " + text
+        for ngram in selected_ngrams:
+            pos = random.randint(0, len(words))
+            words.insert(pos, ngram)
+        return " ".join(words)
+    
+    elif strategy == "inject_trigram":
+        if not ngrams:
+            return " ".join(selected_tokens) + " " + text
+        selected_ngrams = random.sample(ngrams, min(n_inject, len(ngrams)))
+        if len(words) < 2:
+            return " ".join(selected_ngrams) + " " + text
+        for ngram in selected_ngrams:
+            pos = random.randint(0, len(words))
+            words.insert(pos, ngram)
         return " ".join(words)
     
     # Contextual strategies (require token_contexts)
@@ -480,6 +540,8 @@ def run_injection_experiment(
     n_inject_trigram: int = 1,
     strategies: Optional[list[str]] = None,
     token_contexts: Optional[dict[str, dict[str, list[str]]]] = None,
+    top_bigrams: Optional[list[str]] = None,
+    top_trigrams: Optional[list[str]] = None,
     batch_size: int = 16,
     max_length: int = 128,
 ) -> dict:
@@ -542,25 +604,32 @@ def run_injection_experiment(
     
     # Define strategy categories
     simple_strategies = {"prepend", "append", "intersperse", "replace"}
-    bigram_strategies = {"bigram_before", "bigram_after"}
-    trigram_strategies = {"trigram", "active_trigram"}
+    ngram_bigram_strategies = {"inject_bigram", "bigram_before", "bigram_after"}
+    ngram_trigram_strategies = {"inject_trigram", "trigram", "active_trigram"}
     # comma_list uses n_inject since a list needs multiple items
     
     def get_n_inject_for_strategy(strat: str) -> int:
         if strat in simple_strategies or strat == "comma_list":
             return n_inject
-        elif strat in bigram_strategies:
+        elif strat in ngram_bigram_strategies:
             return n_inject_bigram
-        else:  # trigram, active_trigram
+        else:  # trigram strategies
             return n_inject_trigram
     
     for strategy in strategies:
         # Use appropriate n_inject based on strategy type
         n_to_inject = get_n_inject_for_strategy(strategy)
         
+        # Select appropriate ngrams for this strategy
+        ngrams = None
+        if strategy == "inject_bigram":
+            ngrams = top_bigrams
+        elif strategy == "inject_trigram":
+            ngrams = top_trigrams
+        
         # Inject tokens
         injected_texts = [
-            inject_tokens_into_text(text, top_tokens, n_to_inject, strategy, token_contexts)
+            inject_tokens_into_text(text, top_tokens, n_to_inject, strategy, token_contexts, ngrams)
             for text in nonreasoning_texts
         ]
         
@@ -651,9 +720,12 @@ def main():
                         help="Threshold for 'active' tokens as percentage of max activation (0.0 to 1.0). "
                              "Tokens with activation >= max_activation * threshold are considered active.")
     parser.add_argument("--strategies", type=str, nargs="+",
-                        default=["prepend", "append", "intersperse", "replace", "bigram_before", "bigram_after", "trigram", "comma_list"],
+                        default=["prepend", "append", "intersperse", "replace", 
+                                 "inject_bigram", "inject_trigram",
+                                 "bigram_before", "bigram_after", "trigram", "comma_list"],
                         help="Injection strategies to test. Options: prepend, append, intersperse, "
-                             "replace, bigram_before, bigram_after, trigram, comma_list, active_trigram")
+                             "replace, inject_bigram, inject_trigram, bigram_before, bigram_after, "
+                             "trigram, comma_list, active_trigram")
     parser.add_argument("--n-samples", type=int, default=100,
                         help="Number of samples per condition")
     parser.add_argument("--reasoning-dataset", type=str, default="s1k",
@@ -743,9 +815,11 @@ def main():
     print(f"Loaded {len(reasoning_texts)} reasoning texts")
     print(f"Loaded {len(nonreasoning_texts)} non-reasoning texts")
     
-    # Check if contextual strategies are requested
+    # Check if contextual strategies or ngram injection are requested
     contextual_strategies = {"bigram_before", "bigram_after", "trigram", "active_trigram"}
+    ngram_injection_strategies = {"inject_bigram", "inject_trigram"}
     use_contexts = bool(set(args.strategies) & contextual_strategies)
+    use_ngram_injection = bool(set(args.strategies) & ngram_injection_strategies)
     
     # Extract token contexts if needed
     print(f"\nStrategies to test: {', '.join(args.strategies)}")
@@ -784,6 +858,19 @@ def main():
             print(f"  Feature {feat_idx}: Not enough tokens, skipping")
             continue
         
+        # Load top bigrams and trigrams if needed
+        feature_bigrams = None
+        feature_trigrams = None
+        if use_ngram_injection:
+            if "inject_bigram" in args.strategies:
+                feature_bigrams = load_top_ngrams_for_feature(
+                    args.token_analysis, feat_idx, n=2, top_k=20
+                )
+            if "inject_trigram" in args.strategies:
+                feature_trigrams = load_top_ngrams_for_feature(
+                    args.token_analysis, feat_idx, n=3, top_k=10
+                )
+        
         # Get contexts for this feature's tokens
         if use_contexts and global_token_contexts:
             feature_token_contexts = {
@@ -812,6 +899,10 @@ def main():
         
         print(f"\n  Feature {feat_idx}: Testing with {len(top_tokens)} tokens")
         print(f"    Top tokens: {top_tokens[:5]}...")
+        if feature_bigrams:
+            print(f"    Top bigrams: {feature_bigrams[:3]}...")
+        if feature_trigrams:
+            print(f"    Top trigrams: {feature_trigrams[:2]}...")
         
         result = run_injection_experiment(
             model, sae, tokenizer,
@@ -823,6 +914,8 @@ def main():
             n_inject_trigram=args.n_inject_trigram,
             strategies=args.strategies,
             token_contexts=feature_token_contexts,
+            top_bigrams=feature_bigrams,
+            top_trigrams=feature_trigrams,
             batch_size=args.batch_size,
             max_length=args.max_length,
         )

@@ -1151,7 +1151,8 @@ def plot_injection_per_feature(data: dict, output_dir: Path):
         # Color palette for all strategies
         strategy_colors = {
             'prepend': '#C44E52', 'append': '#DD8452', 'intersperse': '#4C72B0',
-            'replace': '#55A868', 'bigram_before': '#8172B3', 'bigram_after': '#CCB974',
+            'replace': '#55A868', 'inject_bigram': '#9370DB', 'inject_trigram': '#6A5ACD',
+            'bigram_before': '#8172B3', 'bigram_after': '#CCB974',
             'trigram': '#64B5CD', 'comma_list': '#DA8BC3', 'active_trigram': '#8C8C8C',
         }
         

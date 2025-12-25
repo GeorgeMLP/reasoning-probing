@@ -157,6 +157,30 @@ def parse_args():
         default=5,
         help="Minimum token occurrences for analysis (default: 5)",
     )
+    parser.add_argument(
+        "--top-k-bigrams",
+        type=int,
+        default=20,
+        help="Number of top bigrams per feature (default: 20)",
+    )
+    parser.add_argument(
+        "--min-bigram-occurrences",
+        type=int,
+        default=3,
+        help="Minimum bigram occurrences for analysis (default: 3)",
+    )
+    parser.add_argument(
+        "--top-k-trigrams",
+        type=int,
+        default=10,
+        help="Number of top trigrams per feature (default: 10)",
+    )
+    parser.add_argument(
+        "--min-trigram-occurrences",
+        type=int,
+        default=2,
+        help="Minimum trigram occurrences for analysis (default: 2)",
+    )
     
     # Reasoning score weights
     parser.add_argument(
@@ -369,15 +393,37 @@ def main():
             top_k_tokens=args.top_k_tokens,
         )
         analysis["feature_stats"] = stat.to_dict()
+        
+        # Add top bigrams
+        top_bigrams = token_analyzer.get_top_ngrams_for_feature(
+            stat.feature_index,
+            n=2,
+            top_k=args.top_k_bigrams,
+            min_occurrences=args.min_bigram_occurrences,
+        )
+        analysis["top_bigrams"] = [b.to_dict() for b in top_bigrams]
+        
+        # Add top trigrams
+        top_trigrams = token_analyzer.get_top_ngrams_for_feature(
+            stat.feature_index,
+            n=3,
+            top_k=args.top_k_trigrams,
+            min_occurrences=args.min_trigram_occurrences,
+        )
+        analysis["top_trigrams"] = [t.to_dict() for t in top_trigrams]
+        
         feature_token_analyses.append(analysis)
         
         # Print summary
         top_tokens = [t["token_str"] for t in analysis["top_tokens"][:5]]
+        top_bi_strs = [b["ngram_str"] for b in analysis["top_bigrams"][:3]]
         print(
             f"Feature {stat.feature_index:>5}: "
             f"Token concentration: {analysis['token_concentration']:.2%}, "
             f"Top tokens: {top_tokens}"
         )
+        if top_bi_strs:
+            print(f"                      Top bigrams: {top_bi_strs}")
     
     # Save results
     if args.save_dir:

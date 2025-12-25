@@ -82,6 +82,20 @@ def load_top_tokens_with_activations(token_analysis_path: Path, feature_index: i
     return []
 
 
+def load_top_ngrams_for_feature(token_analysis_path: Path, feature_index: int, n: int = 2, top_k: int = 10) -> list[str]:
+    """Load top-k n-grams (as concatenated strings) for a feature."""
+    with open(token_analysis_path) as f:
+        data = json.load(f)
+    
+    key = "top_bigrams" if n == 2 else "top_trigrams"
+    
+    for feature in data.get("features", []):
+        if feature.get("feature_index") == feature_index:
+            ngrams = feature.get(key, [])[:top_k]
+            return [ng["ngram_str"] for ng in ngrams]
+    return []
+
+
 def get_token_sequences_from_reasoning_texts(
     reasoning_texts: list[str],
     target_tokens: list[str],
@@ -232,6 +246,7 @@ def inject_tokens_into_text(
     strategy: str,
     seed: Optional[int] = None,
     token_contexts: Optional[dict[str, dict[str, list[str]]]] = None,
+    ngrams: Optional[list[str]] = None,
 ) -> tuple[str, list[tuple[int, int]]]:
     """Inject tokens into text using specified strategy.
     
@@ -245,6 +260,7 @@ def inject_tokens_into_text(
         strategy: Injection strategy
         seed: Random seed for reproducibility
         token_contexts: Optional context information for contextual strategies
+        ngrams: Optional list of n-gram strings for inject_bigram/inject_trigram strategies
     
     Returns:
         tuple: (injected_text, list of (start_char, end_char) tuples for injected regions)
@@ -292,6 +308,37 @@ def inject_tokens_into_text(
         injection = " " + " ".join(selected_tokens)
         marked_injection = START_MARKER + injection + END_MARKER
         result = text + marked_injection
+    
+    # N-gram injection strategies
+    elif strategy == "inject_bigram":
+        if not ngrams:
+            injection = " ".join(selected_tokens)
+            marked_injection = START_MARKER + injection + END_MARKER
+            result = marked_injection + " " + text
+        else:
+            selected_ngrams = random.sample(ngrams, min(n_inject, len(ngrams)))
+            if len(words) < 2:
+                result = " ".join([START_MARKER + ng + END_MARKER for ng in selected_ngrams]) + " " + text
+            else:
+                for ngram in selected_ngrams:
+                    pos = random.randint(0, len(words))
+                    words.insert(pos, START_MARKER + ngram + END_MARKER)
+                result = " ".join(words)
+    
+    elif strategy == "inject_trigram":
+        if not ngrams:
+            injection = " ".join(selected_tokens)
+            marked_injection = START_MARKER + injection + END_MARKER
+            result = marked_injection + " " + text
+        else:
+            selected_ngrams = random.sample(ngrams, min(n_inject, len(ngrams)))
+            if len(words) < 2:
+                result = " ".join([START_MARKER + ng + END_MARKER for ng in selected_ngrams]) + " " + text
+            else:
+                for ngram in selected_ngrams:
+                    pos = random.randint(0, len(words))
+                    words.insert(pos, START_MARKER + ngram + END_MARKER)
+                result = " ".join(words)
     
     # Contextual strategies
     elif strategy == "bigram_before":
@@ -829,6 +876,8 @@ def generate_html_for_feature(
         ("append", "🟤 Injected: Append", "#8b4513"),
         ("intersperse", "🟠 Injected: Intersperse", "#f39c12"),
         ("replace", "🟣 Injected: Replace", "#9b59b6"),
+        ("inject_bigram", "📊 Injected: Top Bigram", "#9370db"),
+        ("inject_trigram", "📈 Injected: Top Trigram", "#6a5acd"),
         ("bigram_before", "🔶 Injected: Bigram Before", "#ff8c00"),
         ("bigram_after", "🔷 Injected: Bigram After", "#1e90ff"),
         ("trigram", "⭐ Injected: Trigram", "#ffd700"),
@@ -938,7 +987,13 @@ def main():
     print(f"  Injection config: n_inject={n_inject}, n_inject_bigram={n_inject_bigram}, n_inject_trigram={n_inject_trigram}")
     if "active_trigram" in strategies_from_config:
         print(f"  Active trigram threshold: {active_trigram_threshold}")
-    print(f"  Strategies: {strategies_from_config}")
+    print(f"  Strategies from config: {strategies_from_config}")
+    
+    # Check for ngram injection strategies
+    if "inject_bigram" not in strategies_from_config:
+        print("  WARNING: inject_bigram not in strategies_from_config - was the injection experiment run with the new strategies?")
+    if "inject_trigram" not in strategies_from_config:
+        print("  WARNING: inject_trigram not in strategies_from_config - was the injection experiment run with the new strategies?")
     
     features = inj_data.get("features", [])
     if not features:
@@ -1019,6 +1074,9 @@ def main():
     # Generate visualizations for each feature
     print("\n--- Generating Visualizations ---")
     
+    # Track successfully processed features for the index
+    processed_features = []
+    
     for feature_data in top_features:
         feat_idx = feature_data["feature_index"]
         print(f"\nProcessing feature {feat_idx}...")
@@ -1031,6 +1089,14 @@ def main():
         
         # Load top tokens with full data for display
         top_tokens_with_data = load_top_tokens_with_activations(args.token_analysis, feat_idx, top_k=20)
+        
+        # Load top bigrams and trigrams for ngram injection strategies
+        feature_bigrams = load_top_ngrams_for_feature(args.token_analysis, feat_idx, n=2, top_k=20)
+        feature_trigrams = load_top_ngrams_for_feature(args.token_analysis, feat_idx, n=3, top_k=10)
+        if feature_bigrams:
+            print(f"  Loaded {len(feature_bigrams)} top bigrams")
+        if feature_trigrams:
+            print(f"  Loaded {len(feature_trigrams)} top trigrams")
         
         # Extract token contexts for contextual strategies
         print(f"  Extracting token contexts from reasoning texts...")
@@ -1085,18 +1151,27 @@ def main():
         def get_n_inject_for_strategy(strategy: str) -> int:
             if strategy in ["prepend", "append", "intersperse", "replace", "comma_list"]:
                 return n_inject
-            elif strategy in ["bigram_before", "bigram_after"]:
+            elif strategy in ["inject_bigram", "bigram_before", "bigram_after"]:
                 return n_inject_bigram
-            else:  # trigram, active_trigram
+            else:  # inject_trigram, trigram, active_trigram
                 return n_inject_trigram
         
         for strategy in strategies_from_config:
             strategy_n_inject = get_n_inject_for_strategy(strategy)
+            
+            # Select appropriate ngrams for this strategy
+            strategy_ngrams = None
+            if strategy == "inject_bigram":
+                strategy_ngrams = feature_bigrams
+            elif strategy == "inject_trigram":
+                strategy_ngrams = feature_trigrams
+            
             for idx, text in enumerate(sample_nonreasoning):
                 # Inject tokens and get regions
                 injected_text, injected_regions = inject_tokens_into_text(
                     text, top_tokens, n_inject=strategy_n_inject, strategy=strategy,
-                    seed=feat_idx * 1000 + idx, token_contexts=token_contexts
+                    seed=feat_idx * 1000 + idx, token_contexts=token_contexts,
+                    ngrams=strategy_ngrams
                 )
                 
                 # Get activations with region-based marking
@@ -1110,11 +1185,18 @@ def main():
                 is_injected = is_injected[:args.max_seq_len]
                 examples[strategy].append((tokens, acts, is_injected))
         
+        # Debug: show which strategies have examples
+        strategies_with_examples = [s for s in strategies_from_config if s in examples and len(examples[s]) > 0]
+        print(f"  Strategies with examples: {strategies_with_examples}")
+        
         # Generate HTML
         output_path = args.output_dir / f"feature_{feat_idx}.html"
         generate_html_for_feature(feature_data, examples, output_path, top_tokens=top_tokens_with_data)
+        
+        # Track successfully processed feature
+        processed_features.append(feature_data)
     
-    # Generate index page
+    # Generate index page (only for successfully processed features)
     index_html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -1177,13 +1259,13 @@ def main():
 <body>
     <div class="header">
         <h1>Token-Level Feature Activation Visualizations</h1>
-        <p>Layer {args.layer} • {len(top_features)} features • {args.reasoning_dataset.upper()} dataset</p>
+        <p>Layer {args.layer} • {len(processed_features)} features • {args.reasoning_dataset.upper()} dataset</p>
     </div>
     
     <div class="features-grid">
 """
     
-    for feature_data in top_features:
+    for feature_data in processed_features:
         feat_idx = feature_data["feature_index"]
         transfer_ratio = feature_data["best_transfer_ratio"]
         classification = feature_data["classification"].replace("_", " ").title()

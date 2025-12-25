@@ -59,6 +59,46 @@ class TokenFeatureAssociation:
         }
 
 
+@dataclass
+class NgramFeatureAssociation:
+    """
+    Association between an n-gram (bigram/trigram) and a feature.
+    
+    Tracks consecutive token sequences that strongly activate features.
+    """
+    token_ids: tuple  # Tuple of token IDs
+    token_strs: tuple  # Tuple of token strings
+    ngram_str: str  # Concatenated string representation
+    feature_index: int
+    n: int  # 2 for bigram, 3 for trigram
+    
+    # Statistics
+    mean_activation: float  # Mean of activations across the n-gram
+    max_activation: float
+    occurrence_count: int
+    occurrence_count_reasoning: int
+    occurrence_count_nonreasoning: int
+    mean_activation_in_reasoning: float
+    mean_activation_in_nonreasoning: float
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
+        return {
+            "token_ids": list(self.token_ids),
+            "token_strs": list(self.token_strs),
+            "ngram_str": self.ngram_str,
+            "feature_index": self.feature_index,
+            "n": self.n,
+            "mean_activation": self.mean_activation,
+            "max_activation": self.max_activation,
+            "occurrence_count": self.occurrence_count,
+            "occurrence_count_reasoning": self.occurrence_count_reasoning,
+            "occurrence_count_nonreasoning": self.occurrence_count_nonreasoning,
+            "mean_activation_in_reasoning": self.mean_activation_in_reasoning,
+            "mean_activation_in_nonreasoning": self.mean_activation_in_nonreasoning,
+        }
+
+
 class TopTokenAnalyzer:
     """
     Analyzes which tokens most strongly activate each SAE feature.
@@ -322,6 +362,87 @@ class TopTokenAnalyzer:
                 else "LOWER token dependency - may capture deeper patterns"
             ),
         }
+    
+    def get_top_ngrams_for_feature(
+        self,
+        feature_index: int,
+        n: int = 2,
+        top_k: int = 30,
+        min_occurrences: int = 3,
+    ) -> list[NgramFeatureAssociation]:
+        """
+        Get the top n-grams (consecutive token sequences) that most strongly activate a feature.
+        
+        Args:
+            feature_index: Index of the feature to analyze
+            n: N-gram size (2 for bigram, 3 for trigram)
+            top_k: Number of top n-grams to return
+            min_occurrences: Minimum occurrences to consider
+        
+        Returns:
+            List of NgramFeatureAssociation sorted by mean activation
+        """
+        acts = self.activations.activations[:, :, feature_index].numpy()
+        tokens = self.activations.tokens.numpy()
+        reasoning_mask = self.reasoning_mask.numpy()
+        
+        # Track n-gram statistics: key = tuple of token_ids
+        ngram_stats = defaultdict(lambda: {
+            'mean_acts': [], 'max_acts': [],
+            'reasoning_acts': [], 'nonreasoning_acts': [],
+        })
+        
+        for sample_idx in range(tokens.shape[0]):
+            is_reasoning = reasoning_mask[sample_idx]
+            seq_len = tokens.shape[1]
+            
+            for pos in range(seq_len - n + 1):
+                ngram_ids = tuple(int(tokens[sample_idx, pos + i]) for i in range(n))
+                ngram_acts = acts[sample_idx, pos:pos + n]
+                mean_act = float(np.mean(ngram_acts))
+                max_act = float(np.max(ngram_acts))
+                
+                stats = ngram_stats[ngram_ids]
+                stats['mean_acts'].append(mean_act)
+                stats['max_acts'].append(max_act)
+                
+                if is_reasoning:
+                    stats['reasoning_acts'].append(mean_act)
+                else:
+                    stats['nonreasoning_acts'].append(mean_act)
+        
+        # Build associations
+        associations = []
+        for ngram_ids, stats in ngram_stats.items():
+            if len(stats['mean_acts']) < min_occurrences:
+                continue
+            
+            # Decode tokens
+            try:
+                token_strs = tuple(self.tokenizer.decode([tid]) for tid in ngram_ids)
+                ngram_str = ''.join(token_strs)
+            except Exception:
+                token_strs = tuple(f"<token_{tid}>" for tid in ngram_ids)
+                ngram_str = ' '.join(token_strs)
+            
+            associations.append(NgramFeatureAssociation(
+                token_ids=ngram_ids,
+                token_strs=token_strs,
+                ngram_str=ngram_str,
+                feature_index=feature_index,
+                n=n,
+                mean_activation=float(np.mean(stats['mean_acts'])),
+                max_activation=float(np.max(stats['max_acts'])),
+                occurrence_count=len(stats['mean_acts']),
+                occurrence_count_reasoning=len(stats['reasoning_acts']),
+                occurrence_count_nonreasoning=len(stats['nonreasoning_acts']),
+                mean_activation_in_reasoning=float(np.mean(stats['reasoning_acts'])) if stats['reasoning_acts'] else 0.0,
+                mean_activation_in_nonreasoning=float(np.mean(stats['nonreasoning_acts'])) if stats['nonreasoning_acts'] else 0.0,
+            ))
+        
+        # Sort by mean activation (descending)
+        associations.sort(key=lambda x: x.mean_activation, reverse=True)
+        return associations[:top_k]
     
     def get_feature_vocabulary(
         self,
