@@ -6,7 +6,9 @@ setup(
     version="0.0.1",
     author="George Ma",
     install_requires=[
+        "zstandard",
         "numpy",
+        "scikit-learn"
         "torch",
         "torchvision",
         "einops",
