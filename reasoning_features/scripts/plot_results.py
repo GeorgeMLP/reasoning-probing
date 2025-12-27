@@ -16,7 +16,6 @@ Usage:
 import argparse
 import json
 from pathlib import Path
-from typing import Optional
 import warnings
 import numpy as np
 import matplotlib.pyplot as plt
