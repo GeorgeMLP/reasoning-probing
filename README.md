@@ -18,8 +18,7 @@ reasoning_features/
 ├── datasets/           # Dataset loaders
 │   ├── pile.py         # Non-reasoning text (Pile)
 │   ├── reasoning.py    # Reasoning datasets (s1K, General Inquiry CoT)
-│   ├── benchmarks.py   # Evaluation benchmarks (AIME24, GPQA Diamond, MATH-500)
-│   └── anova.py        # ANOVA utilities and statistics
+│   └── benchmarks.py   # Evaluation benchmarks (AIME24, GPQA Diamond, MATH-500)
 ├── features/           # Feature analysis
 │   ├── collector.py    # SAE activation collection
 │   ├── detector.py     # Reasoning feature detection
@@ -32,7 +31,6 @@ reasoning_features/
 │   └── llm_judge.py    # LLM-based answer equivalence checking
 └── scripts/            # Main experiment scripts
     ├── find_reasoning_features.py        # Find reasoning-correlated features
-    ├── run_anova_experiment.py           # Token-level ANOVA analysis
     ├── run_token_injection_experiment.py # Causal token injection test ⭐
     ├── run_steering_experiment.py        # Steering benchmark evaluation
     └── plot_results.py                   # Visualization
@@ -95,7 +93,6 @@ results/{setting}/{model}/{dataset}/layer{N}/
 ├── feature_stats.json      # Statistics for all features
 ├── reasoning_features.json # Detected reasoning features
 ├── token_analysis.json     # Token dependency analysis
-├── anova_results.json      # ANOVA analysis results
 ├── injection_results.json  # Token injection experiment results
 └── {benchmark}/            # Steering experiment results per benchmark
     ├── experiment_summary.json
@@ -106,7 +103,115 @@ results/{setting}/{model}/{dataset}/layer{N}/
 
 Example: `results/initial-setting/gemma-2-9b/s1k/layer12/`
 
-## Experiment 2: Steering Experiments
+## Experiment 2: Token Injection (Causal Test) ⭐
+
+**The key causal experiment**: If a feature is truly a "token detector", injecting those tokens into non-reasoning text should activate the feature.
+
+### Experimental Design
+
+1. Take non-reasoning text samples
+2. Inject feature's top tokens using various strategies
+3. Measure activation before and after injection
+4. Compare to activation on actual reasoning text
+
+**Injection Strategies:**
+
+*Simple strategies:*
+- `prepend`: Add tokens at the beginning
+- `append`: Add tokens at the end  
+- `intersperse`: Distribute throughout the text
+- `replace`: Replace random words
+
+*Contextual strategies* (for features sensitive to token sequences):
+- `bigram_before`: Inject [context, token] pairs (e.g., "to identify")
+- `bigram_after`: Inject [token, context] pairs (e.g., "need to")
+- `trigram`: Inject [before, token, after] triplets
+- `comma_list`: Inject as comma-separated list
+
+Contextual strategies are crucial for detecting features that activate on token combinations rather than individual tokens, such as:
+- Verbs that only activate after "to"
+- Pronouns that only activate before specific modals
+- Items in enumerated lists
+
+### Key Metrics
+
+| Metric | Description | Interpretation |
+|--------|-------------|----------------|
+| **Cohen's d** | Standardized effect size (injected vs baseline) | High = token-driven |
+| **p-value** | Statistical significance of activation difference | Low = reliable effect |
+| **Transfer Ratio** | (Injected activation) / (Reasoning activation) | Interpretability metric |
+
+### Classification (Based on Cohen's d, 1988)
+
+Classification uses well-established effect size conventions from Cohen (1988), providing statistically principled thresholds:
+
+| Classification | Criteria | Interpretation |
+|---------------|----------|----------------|
+| **Token-driven** | d ≥ 0.8, p < 0.01 | Large effect: tokens strongly activate feature |
+| **Partially token-driven** | d ≥ 0.5, p < 0.01 | Medium effect: tokens moderately activate feature |
+| **Weakly token-driven** | d ≥ 0.2, p < 0.05 | Small effect: tokens weakly activate feature |
+| **Context-dependent** | d < 0.2 or p ≥ 0.05 | Negligible effect: may capture reasoning structure |
+
+### Usage
+
+```bash
+# Run experiment with simple strategies
+python reasoning_features/scripts/run_token_injection_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --reasoning-features results/layer8/reasoning_features.json \
+    --layer 8 \
+    --top-k-features 10 \
+    --n-samples 100 \
+    --save-dir results/layer8
+
+# Run with contextual strategies (for context-sensitive features)
+python reasoning_features/scripts/run_token_injection_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --reasoning-features results/layer8/reasoning_features.json \
+    --layer 8 \
+    --strategies bigram_before bigram_after trigram \
+    --n-inject-contextual 2 \
+    --save-dir results/layer8
+
+# Visualize token-level activations
+python reasoning_features/scripts/visualize_injection_features.py \
+    --injection-results results/layer8/injection_results.json \
+    --token-analysis results/layer8/token_analysis.json \
+    --layer 8 \
+    --n-features 5 \
+    --n-examples 3 \
+    --output-dir visualizations/token_level/layer8
+```
+
+This creates interactive HTML visualizations showing:
+- **Token-level activations** with color-coded backgrounds (darker = higher activation)
+- **Comparison across conditions**: baseline, reasoning, and injected (all strategies)
+- **Feature metadata**: Cohen's d, p-value, transfer ratio, classification, best strategy
+- Multiple example texts per condition
+
+### Interpretation
+
+| Result | Implication |
+|--------|-------------|
+| Most features token-driven (d ≥ 0.8) | Supports hypothesis: features are shallow |
+| Most features context-dependent (d < 0.2) | Against hypothesis: features may capture reasoning |
+
+### Statistical Justification
+
+The classification uses **Cohen's d effect size**, a standardized measure of the difference between two means:
+
+```
+d = (μ_injected - μ_baseline) / σ_pooled
+```
+
+Cohen's d thresholds (0.2, 0.5, 0.8) are well-established conventions in psychology and social sciences (Cohen, 1988), making them defensible for reviewers:
+- **d = 0.2**: 58% of injected samples exceed baseline median (small effect)
+- **d = 0.5**: 69% of injected samples exceed baseline median (medium effect)  
+- **d = 0.8**: 79% of injected samples exceed baseline median (large effect)
+
+Combined with t-test p-values (α = 0.01 for large/medium effects, α = 0.05 for small effects), this provides rigorous statistical classification.
+
+## Experiment 3: Steering Experiments
 
 Test whether amplifying "reasoning features" actually improves performance on reasoning benchmarks.
 
@@ -221,144 +326,6 @@ Results are saved per-feature:
 |---------|--------|---------|
 | **Pile** | `monology/pile-uncopyrighted` | General web text |
 
-## Experiment 3: ANOVA Analysis
-
-Disentangle **token-level cues** from **reasoning context** using 2×2 factorial ANOVA.
-
-### 2×2 Factorial Design
-
-| | Has Feature's Top Tokens | No Feature's Top Tokens |
-|---|--------------------------|-------------------------|
-| **Reasoning Text** | Quadrant A | Quadrant B |
-| **Non-Reasoning Text** | Quadrant C | Quadrant D |
-
-### Key Metrics
-
-| Metric | Description | Interpretation |
-|--------|-------------|----------------|
-| **η²_token** | Variance explained by token presence | High = token-dependent |
-| **η²_context** | Variance explained by context | High = context-sensitive |
-
-### Usage
-
-```bash
-python reasoning_features/scripts/run_anova_experiment.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --layer 8 \
-    --top-k-features 10 \
-    --n-reasoning-texts 500 \
-    --n-nonreasoning-texts 2000 \
-    --save-dir results/layer8
-```
-
-## Experiment 4: Token Injection (Causal Test) ⭐
-
-**The key causal experiment**: If a feature is truly a "token detector", injecting those tokens into non-reasoning text should activate the feature.
-
-### Experimental Design
-
-1. Take non-reasoning text samples
-2. Inject feature's top tokens using various strategies
-3. Measure activation before and after injection
-4. Compare to activation on actual reasoning text
-
-**Injection Strategies:**
-
-*Simple strategies:*
-- `prepend`: Add tokens at the beginning
-- `append`: Add tokens at the end  
-- `intersperse`: Distribute throughout the text
-- `replace`: Replace random words
-
-*Contextual strategies* (for features sensitive to token sequences):
-- `bigram_before`: Inject [context, token] pairs (e.g., "to identify")
-- `bigram_after`: Inject [token, context] pairs (e.g., "need to")
-- `trigram`: Inject [before, token, after] triplets
-- `comma_list`: Inject as comma-separated list
-
-Contextual strategies are crucial for detecting features that activate on token combinations rather than individual tokens, such as:
-- Verbs that only activate after "to"
-- Pronouns that only activate before specific modals
-- Items in enumerated lists
-
-### Key Metrics
-
-| Metric | Description | Interpretation |
-|--------|-------------|----------------|
-| **Cohen's d** | Standardized effect size (injected vs baseline) | High = token-driven |
-| **p-value** | Statistical significance of activation difference | Low = reliable effect |
-| **Transfer Ratio** | (Injected activation) / (Reasoning activation) | Interpretability metric |
-
-### Classification (Based on Cohen's d, 1988)
-
-Classification uses well-established effect size conventions from Cohen (1988), providing statistically principled thresholds:
-
-| Classification | Criteria | Interpretation |
-|---------------|----------|----------------|
-| **Token-driven** | d ≥ 0.8, p < 0.01 | Large effect: tokens strongly activate feature |
-| **Partially token-driven** | d ≥ 0.5, p < 0.01 | Medium effect: tokens moderately activate feature |
-| **Weakly token-driven** | d ≥ 0.2, p < 0.05 | Small effect: tokens weakly activate feature |
-| **Context-dependent** | d < 0.2 or p ≥ 0.05 | Negligible effect: may capture reasoning structure |
-
-### Usage
-
-```bash
-# Run experiment with simple strategies
-python reasoning_features/scripts/run_token_injection_experiment.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --reasoning-features results/layer8/reasoning_features.json \
-    --layer 8 \
-    --top-k-features 10 \
-    --n-samples 100 \
-    --save-dir results/layer8
-
-# Run with contextual strategies (for context-sensitive features)
-python reasoning_features/scripts/run_token_injection_experiment.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --reasoning-features results/layer8/reasoning_features.json \
-    --layer 8 \
-    --strategies bigram_before bigram_after trigram \
-    --n-inject-contextual 2 \
-    --save-dir results/layer8
-
-# Visualize token-level activations
-python reasoning_features/scripts/visualize_injection_features.py \
-    --injection-results results/layer8/injection_results.json \
-    --token-analysis results/layer8/token_analysis.json \
-    --layer 8 \
-    --n-features 5 \
-    --n-examples 3 \
-    --output-dir visualizations/token_level/layer8
-```
-
-This creates interactive HTML visualizations showing:
-- **Token-level activations** with color-coded backgrounds (darker = higher activation)
-- **Comparison across conditions**: baseline, reasoning, and injected (all strategies)
-- **Feature metadata**: Cohen's d, p-value, transfer ratio, classification, best strategy
-- Multiple example texts per condition
-
-### Interpretation
-
-| Result | Implication |
-|--------|-------------|
-| Most features token-driven (d ≥ 0.8) | Supports hypothesis: features are shallow |
-| Most features context-dependent (d < 0.2) | Against hypothesis: features may capture reasoning |
-
-### Statistical Justification
-
-The classification uses **Cohen's d effect size**, a standardized measure of the difference between two means:
-
-```
-d = (μ_injected - μ_baseline) / σ_pooled
-```
-
-Cohen's d thresholds (0.2, 0.5, 0.8) are well-established conventions in psychology and social sciences (Cohen, 1988), making them defensible for reviewers:
-- **d = 0.2**: 58% of injected samples exceed baseline median (small effect)
-- **d = 0.5**: 69% of injected samples exceed baseline median (medium effect)  
-- **d = 0.8**: 79% of injected samples exceed baseline median (large effect)
-
-Combined with t-test p-values (α = 0.01 for large/medium effects, α = 0.05 for small effects), this provides rigorous statistical classification.
-
 ## Visualization
 
 Generate plots from experiment results:
@@ -375,12 +342,13 @@ python reasoning_features/scripts/plot_results.py \
     --only-injection
 ```
 
-Plot categories: `--only-layer-stats`, `--only-distributions`, `--only-token`, `--only-scatter`, `--only-steering`, `--only-anova`, `--only-injection`, `--only-summary`
+Plot categories: `--only-layer-stats`, `--only-distributions`, `--only-token`, `--only-scatter`, `--only-steering`, `--only-injection`, `--only-interpretation`, `--only-summary`
 
 ## Installation
 
 ```bash
 conda create -n probing python=3.10
+conda activate probing
 pip install -e .
 ```
 
@@ -394,7 +362,15 @@ python reasoning_features/scripts/find_reasoning_features.py \
     --nonreasoning-samples 200 \
     --save-dir results/quick_test
 
-# 2. Run steering experiment (per-feature)
+# 2. Run token injection experiment
+python reasoning_features/scripts/run_token_injection_experiment.py \
+    --token-analysis results/quick_test/token_analysis.json \
+    --reasoning-features results/quick_test/reasoning_features.json \
+    --layer 8 \
+    --top-k-features 3 \
+    --save-dir results/quick_test
+
+# 3. Run steering experiment (per-feature)
 python reasoning_features/scripts/run_steering_experiment.py \
     --features-file results/quick_test/reasoning_features.json \
     --benchmark gpqa_diamond \

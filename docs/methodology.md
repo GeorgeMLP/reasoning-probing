@@ -7,11 +7,9 @@ This document provides mathematical definitions, intuitive justifications, and d
 1. [Research Hypothesis](#1-research-hypothesis)
 2. [Reasoning Feature Detection](#2-reasoning-feature-detection)
 3. [Token Dependency Analysis](#3-token-dependency-analysis)
-4. [ANOVA Analysis](#4-anova-analysis)
+4. [Token Injection Experiments](#4-token-injection-experiments)
 5. [Steering Experiments](#5-steering-experiments)
-6. [Preliminary Results Analysis](#6-preliminary-results-analysis)
-7. [Token Injection Experiments](#7-token-injection-experiments-causal-test)
-8. [Limitations and Future Work](#8-limitations-and-future-work)
+6. [Limitations and Future Work](#6-limitations-and-future-work)
 
 ---
 
@@ -124,89 +122,111 @@ where $p_t = a_t / \sum_{t'} a_{t'}$. Low entropy indicates concentrated activat
 | Normalized Entropy | <0.3 | Feature activation is highly concentrated |
 | Top tokens | Domain-specific | Feature may be a vocabulary detector |
 
----
-
-## 4. ANOVA Analysis
+## 4. Token Injection Experiments
 
 ### 4.1 Motivation
 
-The central question: **Are reasoning features driven by specific tokens or by the reasoning context?**
+The token injection experiment provides direct causal evidence for whether features are token-driven by testing if injecting top-activating tokens into non-reasoning text activates the feature.
 
-Standard correlation analysis cannot disentangle these because tokens and context are confounded in natural data—reasoning text contains both reasoning-associated tokens and reasoning structure.
+### 4.2 Experimental Design
 
-### 4.2 The 2×2 Factorial Design
+1. **Baseline**: Measure feature activation on non-reasoning text
+2. **Target**: Measure feature activation on reasoning text  
+3. **Injection**: Inject the feature's top-k tokens into non-reasoning text
+4. **Comparison**: If injected activation ≈ reasoning activation, the feature is token-driven
 
-We construct four conditions by crossing two factors:
+### 4.3 Injection Strategies
 
-|   | **Has Feature's Top Tokens** | **No Feature's Top Tokens** |
-|---|--------------------------|-------------------------|
-| **Reasoning Text** | Quadrant A | Quadrant B |
-| **Non-Reasoning Text** | Quadrant C | Quadrant D |
+We test both simple and contextual injection strategies:
 
-This design allows us to separately estimate:
-- **Token effect:** Does having specific tokens matter?
-- **Context effect:** Does being reasoning text matter?
-- **Interaction:** Do tokens work differently in different contexts?
+**Simple Strategies** (baseline):
+| Strategy | Description |
+|----------|-------------|
+| **Prepend** | Add tokens at the beginning of text |
+| **Append** | Add tokens at the end of text |
+| **Intersperse** | Distribute tokens throughout the text |
+| **Replace** | Replace random words with tokens |
 
-### 4.3 Token-Level Analysis
+**Contextual Strategies** (token + surrounding context):
+| Strategy | Description | Example |
+|----------|-------------|---------|
+| **Bigram Before** | Inject [context, token] pairs | "to identify" (if "to" often precedes "identify") |
+| **Bigram After** | Inject [token, context] pairs | "need to" (if "to" often follows "need") |
+| **Trigram** | Inject [before, token, after] triplets | "to identify the" |
+| **Comma List** | Inject tokens as comma-separated list | "first, second, third" |
 
-We analyze activations at the **token level**, not text level:
+Contextual strategies are designed to capture features that are sensitive to token sequences rather than individual tokens, such as:
+- Features that activate on verbs only after "to"
+- Features that activate on "I" only before "need" or "should"
+- Features that activate on items in enumerated lists
 
-- **Unit of analysis:** Each token position
-- **Token Factor:** Is this specific token in the feature's top-k token set?
-- **Context Factor:** Is this text from the reasoning corpus?
-- **Dependent variable:** Feature activation at this token position
+**Injection Count**: Since contextual strategies inject multi-token sequences (bigrams/trigrams), we inject fewer of them (default: 2 sequences for contextual strategies vs. 3 tokens for simple strategies) to avoid overwhelming the text with injected content.
 
-This directly tests whether individual tokens drive activation.
+### 4.4 Key Metrics
 
-### 4.4 Statistical Model
+**Transfer Ratio**:
+$$\mathrm{TransferRatio} = \frac{\bar{a}_{\text{injected}} - \bar{a}_{\text{baseline}}}{\bar{a}_{\text{reasoning}} - \bar{a}_{\text{baseline}}}.$$
 
-For each feature $f$, we fit a two-way ANOVA model:
+This measures what fraction of the reasoning-level activation is achieved by token injection alone (for interpretability).
 
-$$a_{ijk} = \mu + \alpha_i + \beta_j + (\alpha\beta)_{ij} + \epsilon_{ijk},$$
+**Cohen's d Effect Size**:
+$$d = \frac{\bar{a}_{\text{injected}} - \bar{a}_{\text{baseline}}}{\sigma_{\text{pooled}}}.$$
 
-where:
-- $a_{ijk}$: Activation at token position $k$ in condition $(i, j)$
-- $\mu$: Grand mean
-- $\alpha_i$: Main effect of **Token Factor**
-- $\beta_j$: Main effect of **Context Factor**
-- $(\alpha\beta)_{ij}$: Interaction effect
+This provides a standardized measure of the difference between injected and baseline activations, independent of scale.
 
-### 4.5 Variance Explained (η²)
+**Statistical Significance**: Independent t-test comparing injected vs. baseline activations.
 
-$$\eta^2_{\text{Token}} = \frac{\mathit{SS}_{\text{Token}}}{\mathit{SS}_{\text{Total}}}, \quad \eta^2_{\text{Context}} = \frac{\mathit{SS}_{\text{Context}}}{\mathit{SS}_{\text{Total}}}.$$
+### 4.5 Classification Criteria (Cohen, 1988)
 
-### 4.6 Classification Criteria
+Classification uses well-established effect size conventions from Cohen (1988):
 
-| Classification | Criteria |
-|---------------|----------|
-| **Token-dominated** | $\eta^2_{\text{token}} > 2 \cdot \eta^2_{\text{context}}$ AND $\eta^2_{\text{token}} > 0.06$ |
-| **Context-dominated** | $\eta^2_{\text{context}} > 2 \cdot \eta^2_{\text{token}}$ AND $\eta^2_{\text{context}} > 0.06$ |
-| **Mixed** | No single factor dominates but effects are non-negligible |
+| Classification | Criteria | Interpretation |
+|---------------|----------|----------------|
+| **Token-driven** | d ≥ 0.8, p < 0.01 | Large effect: feature is a strong token detector |
+| **Partially token-driven** | d ≥ 0.5, p < 0.01 | Medium effect: tokens moderately activate feature |
+| **Weakly token-driven** | d ≥ 0.2, p < 0.05 | Small effect: tokens have minor but reliable effect |
+| **Context-dependent** | d < 0.2 or p ≥ 0.05 | Negligible effect: feature may capture deeper patterns |
 
-### 4.7 Interpreting Results
+These thresholds correspond to the percentage of injected samples exceeding the baseline median:
+- d = 0.2: 58% (small effect)
+- d = 0.5: 69% (medium effect)
+- d = 0.8: 79% (large effect)
 
-| Finding | Interpretation |
-|---------|----------------|
-| Token-dominated | Feature responds to specific tokens regardless of context |
-| Context-dominated | Feature responds to reasoning context, not just tokens |
-| Mixed | Feature responds to token-context combinations |
+### 4.6 Interpreting Results
 
-**Important Note:** A "context-dominated" result does NOT necessarily mean the feature captures genuine reasoning. It could mean:
-1. The feature captures reasoning structure (what we'd hope)
-2. The feature's activating tokens are highly specific to reasoning text (vocabulary effect)
-3. The feature responds to contextual patterns beyond our selected token set
+A high proportion of token-driven features (d ≥ 0.8) indicates that:
+- Simply injecting top tokens produces large activation increases
+- Features are primarily responding to specific vocabulary, not reasoning structure
+- "Reasoning features" are better characterized as "reasoning vocabulary detectors"
 
-Further investigation is needed to distinguish these possibilities.
+### 4.7 Statistical Justification
+
+The Cohen's d approach provides several advantages over arbitrary thresholds:
+
+1. **Standardized**: Effect sizes are scale-independent and comparable across features
+2. **Established conventions**: Cohen (1988) thresholds are widely accepted in psychology and social sciences
+3. **Interpretable**: Maps directly to overlap between distributions and probability of superiority
+4. **Rigorous**: Combined with p-values, provides both practical significance (effect size) and statistical reliability (p-value)
 
 ### 4.8 Usage
 
 ```bash
-# Run ANOVA experiment
-python reasoning_features/scripts/run_anova_experiment.py \
+# Simple strategies (default)
+python reasoning_features/scripts/run_token_injection_experiment.py \
     --token-analysis results/layer8/token_analysis.json \
+    --reasoning-features results/layer8/reasoning_features.json \
     --layer 8 \
+    --reasoning-dataset s1k \
     --top-k-features 10 \
+    --n-samples 100 \
+    --save-dir results/layer8
+
+# Mixed strategies
+python reasoning_features/scripts/run_token_injection_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --reasoning-features results/layer8/reasoning_features.json \
+    --layer 8 \
+    --strategies prepend bigram_before trigram \
     --save-dir results/layer8
 ```
 
@@ -293,191 +313,19 @@ python reasoning_features/scripts/run_steering_experiment.py \
 
 ---
 
-## 6. Preliminary Results Analysis
-
-### 6.1 Token Injection Experiment Results (Layer 12, Gemma-2-9B)
-
-Initial experiments on 10 reasoning features from layer 12 show:
-
-| Classification | Count | Percentage |
-|---------------|-------|------------|
-| Token-driven | 5 | 50% |
-| Partially token-driven | 4 | 40% |
-| Weakly token-driven | 1 | 10% |
-| Context-dependent | 0 | 0% |
-
-**Key Findings:**
-- **Average Cohen's d: 1.2** - Large effect size across features
-- **All features show some token dependency** - No feature was purely context-dependent  
-- **Prepend strategy works best** - Simply prepending tokens is most effective
-
-### 6.2 Interpretation
-
-These results strongly support the hypothesis that "reasoning features" are largely shallow pattern detectors rather than genuine reasoning mechanisms. The large average Cohen's d (1.2) and high proportion of token-driven features (50%) indicate that simply prepending a few tokens (like "Let", "Therefore", mathematical notation) produces substantial activation increases - suggesting the features respond to vocabulary, not reasoning structure.
-
----
+## 6. Limitations and Future Work
 
 ### 6.1 Current Limitations
 
-1. **Token set selection:** The ANOVA analysis depends on which tokens we classify as "reasoning tokens." Different selections may yield different results.
+1. **Token set selection:** Token dependency analysis depends on which tokens we classify as most activating. Different selections may yield different results.
 
-2. **Context confounds:** Even with 2×2 ANOVA, we cannot fully rule out unmeasured confounds. Features may respond to patterns we haven't identified.
-
-3. **Causal interpretation:** Correlation between feature activation and reasoning text does not imply the feature is causally involved in reasoning computation.
-
-## 7. Token Injection Experiments (Causal Test)
-
-### 7.1 Motivation
-
-ANOVA analysis shows correlational relationships, but cannot prove causation. The token injection experiment provides direct causal evidence for whether features are token-driven.
-
-### 7.2 Experimental Design
-
-1. **Baseline**: Measure feature activation on non-reasoning text
-2. **Target**: Measure feature activation on reasoning text  
-3. **Injection**: Inject the feature's top-k tokens into non-reasoning text
-4. **Comparison**: If injected activation ≈ reasoning activation, the feature is token-driven
-
-### 7.2.1 Why Contextual Strategies?
-
-Initial experiments revealed that many features are not triggered by individual tokens, but by **token sequences** or **positional patterns**:
-
-- **Syntactic patterns**: "to [verb]" constructions (e.g., "to identify", "to consider")
-- **Modal constructions**: "I [modal verb]" patterns (e.g., "I need", "I should")
-- **List structures**: Comma-separated items
-- **Phrasal units**: Multi-word expressions
-
-These features are still **shallow pattern detectors** - they don't capture reasoning structure, just slightly more sophisticated lexical patterns. Contextual injection strategies test whether these sequence-sensitive features can be activated by injecting the appropriate token combinations.
-
-### 7.3 Injection Strategies
-
-We test both simple and contextual injection strategies:
-
-**Simple Strategies** (baseline):
-| Strategy | Description |
-|----------|-------------|
-| **Prepend** | Add tokens at the beginning of text |
-| **Append** | Add tokens at the end of text |
-| **Intersperse** | Distribute tokens throughout the text |
-| **Replace** | Replace random words with tokens |
-
-**Contextual Strategies** (token + surrounding context):
-| Strategy | Description | Example |
-|----------|-------------|---------|
-| **Bigram Before** | Inject [context, token] pairs | "to identify" (if "to" often precedes "identify") |
-| **Bigram After** | Inject [token, context] pairs | "need to" (if "to" often follows "need") |
-| **Trigram** | Inject [before, token, after] triplets | "to identify the" |
-| **Comma List** | Inject tokens as comma-separated list | "first, second, third" |
-
-Contextual strategies are designed to capture features that are sensitive to token sequences rather than individual tokens, such as:
-- Features that activate on verbs only after "to"
-- Features that activate on "I" only before "need" or "should"
-- Features that activate on items in enumerated lists
-
-**Injection Count**: Since contextual strategies inject multi-token sequences (bigrams/trigrams), we inject fewer of them (default: 2 sequences for contextual strategies vs. 3 tokens for simple strategies) to avoid overwhelming the text with injected content.
-
-### 7.4 Key Metrics
-
-**Transfer Ratio**:
-$$\mathrm{TransferRatio} = \frac{\bar{a}_{\text{injected}} - \bar{a}_{\text{baseline}}}{\bar{a}_{\text{reasoning}} - \bar{a}_{\text{baseline}}}.$$
-
-This measures what fraction of the reasoning-level activation is achieved by token injection alone (for interpretability).
-
-**Cohen's d Effect Size**:
-$$d = \frac{\bar{a}_{\text{injected}} - \bar{a}_{\text{baseline}}}{\sigma_{\text{pooled}}}.$$
-
-This provides a standardized measure of the difference between injected and baseline activations, independent of scale.
-
-**Statistical Significance**: Independent t-test comparing injected vs. baseline activations.
-
-### 7.5 Classification Criteria (Cohen, 1988)
-
-Classification uses well-established effect size conventions from Cohen (1988):
-
-| Classification | Criteria | Interpretation |
-|---------------|----------|----------------|
-| **Token-driven** | d ≥ 0.8, p < 0.01 | Large effect: feature is a strong token detector |
-| **Partially token-driven** | d ≥ 0.5, p < 0.01 | Medium effect: tokens moderately activate feature |
-| **Weakly token-driven** | d ≥ 0.2, p < 0.05 | Small effect: tokens have minor but reliable effect |
-| **Context-dependent** | d < 0.2 or p ≥ 0.05 | Negligible effect: feature may capture deeper patterns |
-
-These thresholds correspond to the percentage of injected samples exceeding the baseline median:
-- d = 0.2: 58% (small effect)
-- d = 0.5: 69% (medium effect)
-- d = 0.8: 79% (large effect)
-
-### 7.6 Interpreting Results
-
-A high proportion of token-driven features (d ≥ 0.8) indicates that:
-- Simply injecting top tokens produces large activation increases
-- Features are primarily responding to specific vocabulary, not reasoning structure
-- "Reasoning features" are better characterized as "reasoning vocabulary detectors"
-
-### 7.7 Statistical Justification
-
-The Cohen's d approach provides several advantages over arbitrary thresholds:
-
-1. **Standardized**: Effect sizes are scale-independent and comparable across features
-2. **Established conventions**: Cohen (1988) thresholds are widely accepted in psychology and social sciences
-3. **Interpretable**: Maps directly to overlap between distributions and probability of superiority
-4. **Rigorous**: Combined with p-values, provides both practical significance (effect size) and statistical reliability (p-value)
-
-### 7.8 Usage
-
-```bash
-# Simple strategies (default)
-python reasoning_features/scripts/run_token_injection_experiment.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --reasoning-features results/layer8/reasoning_features.json \
-    --layer 8 \
-    --reasoning-dataset s1k \
-    --top-k-features 10 \
-    --n-samples 100 \
-    --save-dir results/layer8
-
-# Customize Cohen's d thresholds
-python reasoning_features/scripts/run_token_injection_experiment.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --reasoning-features results/layer8/reasoning_features.json \
-    --layer 8 \
-    --d-large 0.8 \
-    --d-medium 0.5 \
-    --d-small 0.2 \
-    --alpha 0.01 \
-    --alpha-weak 0.05 \
-    --save-dir results/layer8
-    --token-analysis results/layer8/token_analysis.json \
-    --reasoning-features results/layer8/reasoning_features.json \
-    --layer 8 \
-    --reasoning-dataset s1k \
-    --strategies bigram_before bigram_after trigram comma_list \
-    --n-inject-contextual 2 \
-    --save-dir results/layer8
-
-# Mixed strategies
-python reasoning_features/scripts/run_token_injection_experiment.py \
-    --token-analysis results/layer8/token_analysis.json \
-    --reasoning-features results/layer8/reasoning_features.json \
-    --layer 8 \
-    --strategies prepend bigram_before trigram \
-    --save-dir results/layer8
-```
-
----
-
-## 8. Limitations and Future Work
-
-### 8.1 Current Limitations
-
-1. **Token set selection:** The ANOVA analysis depends on which tokens we classify as "reasoning tokens." Different selections may yield different results.
-
-2. **Context confounds:** Even with 2×2 ANOVA, we cannot fully rule out unmeasured confounds. Features may respond to patterns we haven't identified.
+2. **Context confounds:** We cannot fully rule out unmeasured confounds. Features may respond to contextual patterns beyond our selected token set.
 
 3. **Causal interpretation:** Correlation between feature activation and reasoning text does not imply the feature is causally involved in reasoning computation.
 
 4. **Injection strategy effects:** Different injection strategies may yield different results; prepending tends to work best but may not reflect natural token distributions.
 
-### 8.2 Future Directions
+### 6.2 Future Directions
 
 1. **Gradient-based attribution:** Use input gradients to identify which tokens causally drive feature activations.
 
