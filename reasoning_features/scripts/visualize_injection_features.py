@@ -49,7 +49,7 @@ def parse_args():
     parser.add_argument("--max-seq-len", type=int, default=256,
                         help="Maximum sequence length to display")
     parser.add_argument("--model-name", default="google/gemma-3-4b-it")
-    parser.add_argument("--sae-name", default="gemma-scope-4b-it-res-all")
+    parser.add_argument("--sae-name", default="gemma-scope-2-4b-it-res-all")
     parser.add_argument("--sae-id-format", default="layer_{layer}_width_16k_l0_small")
     parser.add_argument("--reasoning-dataset", default="s1k",
                         choices=["s1k", "general_inquiry_cot"])
