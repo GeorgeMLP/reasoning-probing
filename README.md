@@ -446,6 +446,7 @@ Plot categories: `--only-layer-stats`, `--only-distributions`, `--only-token`, `
 
 ## Installation
 
+This repository depends on a customized version of Transformer Lens that supports Gemma 3, which can be cloned in this link: https://github.com/AIRI-Institute/SAE-Reasoning/.
 ```bash
 conda create -n probing python=3.11
 conda activate probing
