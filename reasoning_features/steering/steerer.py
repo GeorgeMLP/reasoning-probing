@@ -166,6 +166,7 @@ class FeatureSteerer:
         temperature: float = 0.7,
         top_p: float = 0.9,
         do_sample: bool = True,
+        apply_chat_template: bool = True,
         **generate_kwargs,
     ) -> str:
         """
@@ -178,6 +179,7 @@ class FeatureSteerer:
             temperature: Sampling temperature
             top_p: Nucleus sampling parameter
             do_sample: Whether to sample (vs greedy)
+            apply_chat_template: Whether to apply chat template (matches lm-eval)
             **generate_kwargs: Additional arguments for generate()
         
         Returns:
@@ -194,8 +196,19 @@ class FeatureSteerer:
             except:
                 device = self.model.device
             
+            # Apply chat template if requested
+            if apply_chat_template and hasattr(self.model.tokenizer, 'apply_chat_template'):
+                messages = [{"role": "user", "content": prompt}]
+                formatted_prompt = self.model.tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+            else:
+                formatted_prompt = prompt
+            
             inputs = self.model.tokenizer(
-                prompt,
+                formatted_prompt,
                 return_tensors="pt",
             ).to(device)
             
@@ -228,6 +241,7 @@ class FeatureSteerer:
         temperature: float = 0.7,
         top_p: float = 0.9,
         do_sample: bool = True,
+        apply_chat_template: bool = True,
         **generate_kwargs,
     ) -> str:
         """Generate text without any steering (baseline)."""
@@ -238,8 +252,19 @@ class FeatureSteerer:
         except:
             device = self.model.device
         
+        # Apply chat template if requested
+        if apply_chat_template and hasattr(self.model.tokenizer, 'apply_chat_template'):
+            messages = [{"role": "user", "content": prompt}]
+            formatted_prompt = self.model.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+        else:
+            formatted_prompt = prompt
+        
         inputs = self.model.tokenizer(
-            prompt,
+            formatted_prompt,
             return_tensors="pt",
         ).to(device)
         
@@ -257,34 +282,3 @@ class FeatureSteerer:
         prompt_length = inputs["input_ids"].shape[1]
         generated = outputs[0, prompt_length:]
         return self.model.tokenizer.decode(generated, skip_special_tokens=True)
-    
-    def compare_generations(
-        self,
-        prompt: str,
-        config: SteeringConfig,
-        max_new_tokens: int = 256,
-        **generate_kwargs,
-    ) -> dict:
-        """
-        Generate with and without steering for comparison.
-        
-        Returns:
-            Dict with 'baseline' and 'steered' generations
-        """
-        baseline = self.generate_baseline(
-            prompt, max_new_tokens=max_new_tokens, **generate_kwargs
-        )
-        steered = self.generate_with_steering(
-            prompt, config, max_new_tokens=max_new_tokens, **generate_kwargs
-        )
-        
-        return {
-            "prompt": prompt,
-            "baseline": baseline,
-            "steered": steered,
-            "config": {
-                "feature_index": config.feature_index,
-                "gamma": config.gamma,
-                "max_feature_activation": config.max_feature_activation,
-            },
-        }

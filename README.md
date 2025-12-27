@@ -451,7 +451,6 @@ This repository depends on a customized version of Transformer Lens that support
 conda create -n probing python=3.11
 conda activate probing
 pip install -e .
-pip install vllm --extra-index-url https://download.pytorch.org/whl/cu129
 pip uninstall transformer-lens
 cd TransformerLens
 pip install -e .

@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 import json
-import torch
 import tqdm
 
 from sae_lens import SAE, HookedSAETransformer
@@ -135,6 +134,7 @@ class BenchmarkEvaluator:
         temperature: float = 0.1,  # Low temp for more deterministic outputs
         top_p: float = 0.95,
         do_sample: bool = True,
+        apply_chat_template: bool = True,
         max_samples: Optional[int] = None,
         verbose: bool = True,
     ) -> EvaluationResult:
@@ -185,6 +185,7 @@ class BenchmarkEvaluator:
                     temperature=temperature,
                     top_p=top_p,
                     do_sample=do_sample,
+                    apply_chat_template=apply_chat_template,
                 )
             else:
                 response = self.steerer.generate_with_steering(
@@ -194,6 +195,7 @@ class BenchmarkEvaluator:
                     temperature=temperature,
                     top_p=top_p,
                     do_sample=do_sample,
+                    apply_chat_template=apply_chat_template,
                 )
             
             # Check answer
@@ -227,102 +229,3 @@ class BenchmarkEvaluator:
                 "do_sample": do_sample,
             },
         )
-    
-    def run_feature_steering_experiment(
-        self,
-        benchmark_name: str,
-        feature_index: int,
-        max_feature_activation: float,
-        gamma_values: list[float] = [-2.0, -1.0, 0.0, 1.0, 2.0],
-        max_new_tokens: int = 512,
-        max_samples: Optional[int] = None,
-        save_dir: Optional[Path] = None,
-        verbose: bool = True,
-    ) -> dict[float, EvaluationResult]:
-        """
-        Run a steering experiment for a single feature with multiple gamma values.
-        
-        Args:
-            benchmark_name: Benchmark to evaluate
-            feature_index: Single feature to steer
-            max_feature_activation: The f_max value for this feature
-            gamma_values: List of gamma values to test
-            max_new_tokens: Max tokens for generation
-            max_samples: Limit samples (for testing)
-            save_dir: Directory to save results (per-gamma)
-            verbose: Show progress
-        
-        Returns:
-            Dict mapping gamma -> EvaluationResult
-        """
-        results = {}
-        
-        for gamma in gamma_values:
-            if gamma == 0.0:
-                # gamma=0.0 is same as baseline
-                condition = "baseline"
-                config = None
-            else:
-                condition = "steered"
-                config = SteeringConfig(
-                    feature_index=feature_index,
-                    gamma=gamma,
-                    max_feature_activation=max_feature_activation,
-                    layer_index=self.layer_index,
-                )
-            
-            if verbose:
-                print(f"\n=== Gamma: {gamma} ===")
-            
-            result = self.evaluate(
-                benchmark_name=benchmark_name,
-                condition=condition,
-                steering_config=config,
-                max_new_tokens=max_new_tokens,
-                max_samples=max_samples,
-                verbose=verbose,
-            )
-            
-            results[gamma] = result
-            
-            if verbose:
-                print(f"Accuracy: {result.accuracy:.2%} ({result.correct}/{result.total})")
-            
-            if save_dir:
-                save_path = Path(save_dir) / f"result_gamma_{gamma:.2f}.json"
-                result.save(save_path)
-        
-        return results
-
-
-def load_model_and_sae(
-    model_name: str = "google/gemma-2-2b",
-    sae_name: str = "gemma-scope-2b-pt-res-canonical",
-    sae_id_format: str = "layer_{layer}/width_16k/canonical",
-    layer_index: int = 8,
-    device: str = "cuda",
-) -> tuple[HookedSAETransformer, SAE]:
-    """
-    Convenience function to load model and SAE.
-    
-    Returns:
-        Tuple of (model, sae)
-    """
-    print(f"Loading model: {model_name}")
-    model = HookedSAETransformer.from_pretrained_no_processing(
-        model_name,
-        device=device,
-        dtype=torch.bfloat16,
-    )
-    
-    print(f"Loading SAE for layer {layer_index}")
-    sae_id = sae_id_format.format(layer=layer_index)
-    sae = SAE.from_pretrained(
-        release=sae_name,
-        sae_id=sae_id,
-        device=device,
-    )
-    if isinstance(sae, tuple):
-        sae = sae[0]
-    
-    return model, sae

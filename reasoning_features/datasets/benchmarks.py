@@ -7,40 +7,6 @@ from datasets import load_dataset
 from .base import BaseBenchmark, BenchmarkSample
 
 
-# One-shot example for math problems (not from any benchmark)
-MATH_ONE_SHOT_EXAMPLE = """Example:
-Problem: If $x + y = 106$ and $x - y = 488$, what is the value of $x$?
-
-Solution: Let me work through this step by step.
-
-I need to solve this system of equations. Adding the two equations:
-$(x + y) + (x - y) = 106 + 488$
-
-Simplifying the left-hand side:
-$2x = 594$
-
-Dividing both sides by 2:
-$x = 297$
-
-Therefore, the value of $x$ is $\\boxed{297}$.
-
-"""
-
-# One-shot example for multiple choice (not from any benchmark)
-MCQ_ONE_SHOT_EXAMPLE = """Example:
-Question: Which of the following is the largest planet in our solar system?
-A) Earth
-B) Mars
-C) Jupiter
-D) Saturn
-
-Answer: The largest planet in our solar system is Jupiter, which has a mass more than twice that of all other planets combined. Its diameter is about 11 times that of Earth.
-
-\\boxed{C}
-
-"""
-
-
 class AIME24Benchmark(BaseBenchmark):
     """
     AIME 2024 benchmark (math-ai/aime24).
@@ -108,18 +74,7 @@ class AIME24Benchmark(BaseBenchmark):
     
     def format_prompt(self, question: str) -> str:
         """Format question into a prompt for the model."""
-        # Note: We start the solution with a specific phrase to encourage
-        # step-by-step reasoning. Without this, some base models may output
-        # placeholder answers like \boxed{?} immediately, especially with
-        # low temperature settings.
-        return (
-            f"Solve the following math problem. "
-            f"Provide your final answer in \\boxed{{}} format.\n\n"
-            f"{MATH_ONE_SHOT_EXAMPLE}"
-            f"Now solve this problem:\n"
-            f"Problem: {question}\n\n"
-            f"Solution: Let me work through this step by step.\n\n"
-        )
+        return f"Please reason step by step, and put your final answer within \\boxed{{}}.\nProblem: {question}\nAnswer:"
 
 
 class GPQADiamondBenchmark(BaseBenchmark):
@@ -181,15 +136,7 @@ class GPQADiamondBenchmark(BaseBenchmark):
     
     def format_prompt(self, question: str) -> str:
         """Format question into a prompt for the model."""
-        return (
-            f"Answer the following multiple choice question. "
-            f"Provide your final answer in \\boxed{{}} format with "
-            f"the letter (A, B, C, or D).\n\n"
-            f"{MCQ_ONE_SHOT_EXAMPLE}"
-            f"Now answer this question:\n"
-            f"Question: {question}\n\n"
-            f"Answer:"
-        )
+        return f"Answer the following multiple choice question. The last line of your response should be of the following format: 'Answer: $LETTER' (without quotes) where LETTER is one of ABCD. Think step by step before answering.\n\n{question}"
 
 
 class MATH500Benchmark(BaseBenchmark):
@@ -314,18 +261,7 @@ class MATH500Benchmark(BaseBenchmark):
     
     def format_prompt(self, question: str) -> str:
         """Format question into a prompt for the model."""
-        # Note: We start the solution with a specific phrase to encourage
-        # step-by-step reasoning. Without this, some base models may output
-        # placeholder answers like \boxed{?} immediately, especially with
-        # low temperature settings.
-        return (
-            f"Solve the following math problem. "
-            f"Provide your final answer in \\boxed{{}} format.\n\n"
-            f"{MATH_ONE_SHOT_EXAMPLE}"
-            f"Now solve this problem:\n"
-            f"Problem: {question}\n\n"
-            f"Solution: Let me work through this step by step.\n\n"
-        )
+        return f"Please reason step by step, and put your final answer within \\boxed{{}}.\nProblem: {question}\nAnswer:"
 
 
 def get_benchmark(

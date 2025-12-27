@@ -67,12 +67,12 @@ import json
 import os
 from pathlib import Path
 import sys
+import torch
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from reasoning_features.steering import BenchmarkEvaluator
-from reasoning_features.steering.evaluator import load_model_and_sae
+from reasoning_features.steering import BenchmarkEvaluator, SteeringConfig
 
 
 def parse_args():
@@ -90,8 +90,8 @@ def parse_args():
     )
     parser.add_argument(
         "--sae-name",
-        default="gemma-scope-4b-it-res-all",
-        help="SAE release name (default: gemma-scope-4b-it-res-all)",
+        default="gemma-scope-2-4b-it-res-all",
+        help="SAE release name (default: gemma-scope-2-4b-it-res-all)",
     )
     parser.add_argument(
         "--sae-id-format",
@@ -151,22 +151,27 @@ def parse_args():
     
     # Generation parameters
     parser.add_argument(
-        "--max-new-tokens",
+        "--max-gen-toks",
         type=int,
-        default=512,
-        help="Maximum tokens to generate (default: 512)",
+        default=32768,
+        help="Maximum tokens to generate (default: 32768 for full reasoning traces)",
     )
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.1,
-        help="Sampling temperature (default: 0.1)",
+        default=0.6,
+        help="Sampling temperature (default: 0.6, matching lm-eval)",
     )
     parser.add_argument(
         "--top-p",
         type=float,
         default=0.95,
         help="Nucleus sampling parameter (default: 0.95)",
+    )
+    parser.add_argument(
+        "--no-chat-template",
+        action="store_true",
+        help="Disable chat template application",
     )
     
     # Output
@@ -248,7 +253,9 @@ def main():
     print(f"Layer: {args.layer}")
     print(f"Benchmark: {args.benchmark}")
     print(f"Gamma values: {args.gamma_values}")
-    print(f"Max new tokens: {args.max_new_tokens}")
+    print(f"Max new tokens: {args.max_gen_toks}")
+    print(f"Temperature: {args.temperature}")
+    print(f"Chat template: {not args.no_chat_template}")
     print("=" * 60)
     
     # Load feature info
@@ -270,17 +277,28 @@ def main():
     if args.save_dir:
         args.save_dir.mkdir(parents=True, exist_ok=True)
     
-    # Load model and SAE
-    model, sae = load_model_and_sae(
-        model_name=args.model_name,
-        sae_name=args.sae_name,
-        sae_id_format=args.sae_id_format,
-        layer_index=args.layer,
-        device=args.device,
+    # Initialize TransformerLens evaluator
+    print("\nInitializing TransformerLens evaluator...")
+    from sae_lens import SAE, HookedSAETransformer
+    
+    model = HookedSAETransformer.from_pretrained_no_processing(
+        args.model_name,
+        device="cuda",
+        dtype=torch.bfloat16,
     )
     
-    # Create evaluator
-    evaluator = BenchmarkEvaluator(model, sae, layer_index=args.layer)
+    sae_id = args.sae_id_format.format(layer=args.layer)
+    sae = SAE.from_pretrained(
+        release=args.sae_name,
+        sae_id=sae_id,
+        device="cuda",
+    )
+    
+    evaluator = BenchmarkEvaluator(
+        model=model,
+        sae=sae,
+        layer_index=args.layer,
+    )
     
     # Store all results for final summary
     all_results = {}
@@ -306,17 +324,50 @@ def main():
         else:
             feature_save_dir = None
         
-        # Run experiment for this feature
-        results = evaluator.run_feature_steering_experiment(
-            benchmark_name=args.benchmark,
-            feature_index=feature_index,
-            max_feature_activation=max_activation,
-            gamma_values=args.gamma_values,
-            max_new_tokens=args.max_new_tokens,
-            max_samples=args.max_samples,
-            save_dir=feature_save_dir,
-            verbose=True,
-        )
+        # Run experiment for this feature - evaluate each gamma separately
+        results = {}
+        
+        for gamma in args.gamma_values:
+            print(f"\n{'='*60}")
+            print(f"Testing gamma = {gamma}")
+            print(f"{'='*60}")
+            
+            if gamma == 0.0:
+                # Baseline
+                result = evaluator.evaluate(
+                    benchmark_name=args.benchmark,
+                    condition="baseline",
+                    max_new_tokens=args.max_gen_toks,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    max_samples=args.max_samples,
+                    verbose=True,
+                )
+            else:
+                # Steered
+                steering_config = SteeringConfig(
+                    feature_index=feature_index,
+                    gamma=gamma,
+                    max_feature_activation=max_activation,
+                )
+                result = evaluator.evaluate(
+                    benchmark_name=args.benchmark,
+                    condition=f"steered_gamma_{gamma}",
+                    steering_config=steering_config,
+                    max_new_tokens=args.max_gen_toks,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    max_samples=args.max_samples,
+                    verbose=True,
+                )
+            
+            results[gamma] = result
+            
+            # Save individual result
+            if feature_save_dir:
+                # Format gamma value with 2 decimal places and sign
+                gamma_str = f"{gamma:.2f}" if gamma >= 0 else f"{gamma:.2f}"
+                result.save(feature_save_dir / f"result_gamma_{gamma_str}.json")
         
         all_results[feature_index] = results
         
@@ -334,30 +385,31 @@ def main():
         
         # Save feature summary
         if feature_save_dir:
-            summary_path = feature_save_dir / "feature_summary.json"
-            
             # Find best and worst gamma
-            best_gamma = max(results.keys(), key=lambda g: results[g].accuracy)
-            worst_gamma = min(results.keys(), key=lambda g: results[g].accuracy)
+            sorted_by_acc = sorted(results.items(), key=lambda x: x[1].accuracy)
+            worst_gamma, worst_result = sorted_by_acc[0]
+            best_gamma, best_result = sorted_by_acc[-1]
             
-            with open(summary_path, "w") as f:
-                json.dump({
-                    "feature_index": feature_index,
-                    "max_feature_activation": max_activation,
-                    "baseline_accuracy": baseline_acc,
-                    "best_gamma": best_gamma,
-                    "best_accuracy": results[best_gamma].accuracy,
-                    "worst_gamma": worst_gamma,
-                    "worst_accuracy": results[worst_gamma].accuracy,
-                    "results": {
-                        str(gamma): {
-                            "accuracy": result.accuracy,
-                            "correct": result.correct,
-                            "total": result.total,
-                        }
-                        for gamma, result in results.items()
-                    },
-                }, f, indent=2)
+            feature_summary = {
+                "feature_index": feature_index,
+                "max_feature_activation": max_activation,
+                "baseline_accuracy": baseline_acc,
+                "best_gamma": best_gamma,
+                "best_accuracy": best_result.accuracy,
+                "worst_gamma": worst_gamma,
+                "worst_accuracy": worst_result.accuracy,
+                "results": {
+                    str(gamma): {
+                        "accuracy": result.accuracy,
+                        "correct": result.correct,
+                        "total": result.total,
+                    }
+                    for gamma, result in results.items()
+                }
+            }
+            
+            with open(feature_save_dir / "feature_summary.json", "w") as f:
+                json.dump(feature_summary, f, indent=2)
     
     # Print overall summary
     print("\n" + "=" * 60)
@@ -419,6 +471,9 @@ def main():
                     "benchmark": args.benchmark,
                     "gamma_values": args.gamma_values,
                     "feature_indices": feature_indices,
+                    "max_gen_toks": args.max_gen_toks,
+                    "temperature": args.temperature,
+                    "chat_template": not args.no_chat_template,
                 },
                 "per_feature_results": {
                     str(feat_idx): {
