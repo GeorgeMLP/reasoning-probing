@@ -8,8 +8,9 @@ This document provides mathematical definitions, intuitive justifications, and d
 2. [Reasoning Feature Detection](#2-reasoning-feature-detection)
 3. [Token Dependency Analysis](#3-token-dependency-analysis)
 4. [Token Injection Experiments](#4-token-injection-experiments)
-5. [Steering Experiments](#5-steering-experiments)
-6. [Limitations and Future Work](#6-limitations-and-future-work)
+5. [LLM-Guided Feature Interpretation](#5-llm-guided-feature-interpretation)
+6. [Steering Experiments](#6-steering-experiments)
+7. [Limitations and Future Work](#7-limitations-and-future-work)
 
 ---
 
@@ -232,13 +233,202 @@ python reasoning_features/scripts/run_token_injection_experiment.py \
 
 ---
 
-## 5. Steering Experiments
+## 5. LLM-Guided Feature Interpretation
 
-### 5.1 Purpose
+### 5.1 Motivation
+
+While token injection experiments (Section 4) effectively identify features driven by specific token-level heuristics, they face a fundamental limitation: **the space of possible lexical and syntactic patterns is intractably large**. A feature may activate on sophisticated linguistic patterns that we failed to test—not because it captures reasoning, but because our injection strategies didn't cover that particular confound.
+
+Consider a feature that activates on:
+- Formal academic discourse markers ("Furthermore", "Consequently", "In light of")
+- Complex syntactic structures (subordinate clauses, relative clauses)
+- Abstract vocabulary regardless of reasoning content
+- Prose sophistication/complexity independent of cognitive processes
+
+Such features would be classified as "context-dependent" by token injection (since simple token injection fails to activate them), yet they clearly do not capture genuine reasoning processes. They are **confounds**: linguistic patterns that co-occur with reasoning in training data but are not causally involved in reasoning.
+
+### 5.2 Approach: Automated Hypothesis Testing
+
+We employ a large language model (LLM) as an intelligent hypothesis-testing agent to systematically probe feature behavior and discover counterexamples that reveal confounds. The LLM has two key advantages:
+
+1. **Broad linguistic coverage**: Can generate diverse text patterns across vocabulary, syntax, style, and content
+2. **Strategic sampling**: Can iteratively refine hypotheses based on empirical feedback from the model
+
+### 5.3 Experimental Protocol
+
+For each context-dependent feature from token injection experiments, we conduct the following iterative analysis:
+
+#### Step 1: Hypothesis Generation
+
+Given:
+- Top-k tokens ranked by mean activation (Section 3)
+- $N$ high-activation examples from reasoning dataset
+- Token-level activation patterns within each example
+
+The LLM generates an initial hypothesis about what linguistic pattern the feature detects, considering:
+- Lexical patterns (vocabulary, word categories)
+- Syntactic patterns (clause structures, dependencies)
+- Discourse patterns (hedging, meta-cognition, transitions)
+- Stylistic patterns (formality, complexity, verbosity)
+
+#### Step 2: Counterexample Generation
+
+The LLM generates two types of counterexamples to test the hypothesis:
+
+**False Positives (FP)**: Non-reasoning text predicted to activate the feature
+- Goal: Prove the feature activates on something other than reasoning
+- Strategy: Generate non-reasoning content (recipes, reviews, news, fiction) containing the hypothesized linguistic pattern
+
+**False Negatives (FN)**: Reasoning text predicted to NOT activate the feature  
+- Goal: Prove the feature misses genuine reasoning
+- Strategy: Generate reasoning content that avoids the hypothesized pattern (casual language, simple syntax, different vocabulary)
+
+Each iteration generates 5 candidates per category, for a total of 10 candidate texts.
+
+#### Step 3: Empirical Validation
+
+Each candidate text is evaluated against the actual model:
+
+$$\text{FP valid} \iff \max(a_f(\text{candidate})) > \tau \text{ AND candidate is non-reasoning}$$
+
+$$\text{FN valid} \iff \max(a_f(\text{candidate})) < 0.1\tau \text{ AND candidate is reasoning}$$
+
+where $a_f(\text{candidate})$ is the feature activation on the candidate text, and $\tau = \alpha \cdot \max_{\text{examples}} a_f$ is the activation threshold ($\alpha \in [0, 1]$, default: 0.5).
+
+#### Step 4: Iterative Refinement
+
+Valid counterexamples from previous iterations inform subsequent generation:
+- **Successful patterns** (valid counterexamples) are reinforced
+- **Failed patterns** (invalid counterexamples) are avoided
+
+The process continues until:
+- Sufficient counterexamples are found ($\geq k_{\text{FP}}$ false positives AND $\geq k_{\text{FN}}$ false negatives), OR
+- Maximum iterations $T$ is reached
+
+#### Step 5: Final Classification
+
+Based on the collected counterexamples, the LLM provides:
+
+1. **Refined interpretation**: What the feature actually detects
+2. **Activation patterns**: What content/structures activate it
+3. **Non-activation patterns**: What content/structures don't activate it  
+4. **Confidence**: HIGH/MEDIUM/LOW based on consistency of evidence
+5. **Classification**: "Genuine reasoning feature" (true) or "Confound" (false)
+
+A feature is classified as a **genuine reasoning feature** only if:
+- It activates specifically on reasoning/thinking/deliberation
+- It does NOT activate on non-reasoning content (few false positives)
+- It activates on diverse types of reasoning (few false negatives)
+
+### 5.4 Advantages Over Manual Analysis
+
+This automated approach provides several key advantages:
+
+1. **Systematic coverage**: Tests diverse linguistic patterns beyond manually-designed heuristics
+2. **Scalability**: Can analyze hundreds of features without human intervention
+3. **Consistency**: Applies uniform evaluation criteria across all features
+4. **Iterative refinement**: Learns from failures to improve counterexample generation
+5. **Explainability**: Generates human-interpretable descriptions of feature behavior
+
+### 5.5 Example: Feature 715 (Gemma-2-9B, Layer 16)
+
+**Token injection result**: Context-dependent (Cohen's d = 0.18, p = 0.09)
+
+**LLM analysis**:
+- Initial hypothesis: "Detects planning and deliberation discourse"
+- False positives found: 5 (formal non-reasoning text activated)
+- False negatives found: 4 (casual reasoning did not activate)
+
+**Refined interpretation**: "Detects lexically sophisticated, syntactically complex prose regardless of reasoning content. Activates on formal academic writing, complex sentences (>20 words), and abstract vocabulary. Does not activate on casual language, simple sentences, or concrete vocabulary—even when expressing genuine reasoning."
+
+**Classification**: Confound (not a genuine reasoning feature)
+
+This reveals that the feature is a **prose sophistication detector**, not a reasoning detector—a confound that would be missed by token injection experiments.
+
+### 5.6 Implementation Details
+
+**LLM**: Google Gemini 3 Pro via OpenRouter API
+- Temperature: 0.8 for counterexample generation (diversity)
+- Temperature: 0.3 for interpretation (consistency)
+
+**Hyperparameters**:
+- Maximum iterations: $T = 5$
+- Minimum false positives: $k_{\text{FP}} = 3$
+- Minimum false negatives: $k_{\text{FN}} = 3$
+- Activation threshold ratio: $\alpha = 0.5$
+
+**Early stopping**: Generation halts when sufficient counterexamples of each type are found, optimizing API cost and latency.
+
+### 5.7 Usage
+
+```bash
+# Analyze context-dependent features from injection results
+python reasoning_features/scripts/analyze_feature_interpretation.py \
+    --injection-results results/layer16/injection_results.json \
+    --token-analysis results/layer16/token_analysis.json \
+    --layer 16 \
+    --mode context_dependent \
+    --output results/layer16/feature_interpretations.json
+
+# Analyze all reasoning features
+python reasoning_features/scripts/analyze_feature_interpretation.py \
+    --reasoning-features results/layer16/reasoning_features.json \
+    --token-analysis results/layer16/token_analysis.json \
+    --layer 16 \
+    --mode all_reasoning \
+    --output results/layer16/feature_interpretations.json
+
+# Analyze specific features
+python reasoning_features/scripts/analyze_feature_interpretation.py \
+    --feature-indices 715 494 13302 \
+    --token-analysis results/layer16/token_analysis.json \
+    --layer 16 \
+    --output results/layer16/feature_interpretations.json
+```
+
+### 5.8 Output Format
+
+Results are saved as JSON with summary statistics and per-feature analyses:
+
+```json
+{
+  "summary": {
+    "total_features_analyzed": 20,
+    "genuine_reasoning_features": 2,
+    "non_reasoning_features": 18,
+    "high_confidence": 15,
+    "medium_confidence": 4,
+    "low_confidence": 1,
+    "total_false_positives": 87,
+    "total_false_negatives": 63,
+    "max_iterations_required": 3.5
+  },
+  "features": [
+    {
+      "feature_index": 715,
+      "initial_hypothesis": "...",
+      "refined_interpretation": "...",
+      "activates_on": ["...", "..."],
+      "does_not_activate_on": ["...", "..."],
+      "false_positive_examples": [...],
+      "false_negative_examples": [...],
+      "confidence": "HIGH",
+      "is_genuine_reasoning_feature": false,
+      "iterations_used": 3
+    }
+  ]
+}
+```
+
+---
+
+## 6. Steering Experiments
+
+### 6.1 Purpose
 
 Test whether amplifying "reasoning features" actually improves performance on reasoning benchmarks. This provides causal evidence for whether features capture genuine reasoning.
 
-### 5.2 Decoder Direction Steering
+### 6.2 Decoder Direction Steering
 
 We use direct decoder direction steering to modify the residual stream:
 
@@ -256,7 +446,7 @@ where:
 - **Bidirectional**: Negative $\gamma$ suppresses, positive $\gamma$ amplifies
 - **Per-feature**: Each feature is steered individually to isolate effects
 
-### 5.3 Per-Feature Evaluation
+### 6.3 Per-Feature Evaluation
 
 Unlike previous approaches that steered all top-k features simultaneously, we now evaluate each feature individually:
 
@@ -270,7 +460,7 @@ Unlike previous approaches that steered all top-k features simultaneously, we no
    - Distinguishing features with positive vs. negative effects
    - Understanding individual feature contributions
 
-### 5.4 Supported Benchmarks
+### 6.4 Supported Benchmarks
 
 | Benchmark | Task | Metric |
 |-----------|------|--------|
@@ -278,7 +468,7 @@ Unlike previous approaches that steered all top-k features simultaneously, we no
 | GPQA Diamond | Graduate-level science MCQ | A/B/C/D accuracy |
 | MATH-500 | Diverse math problems | LLM-judged equivalence |
 
-### 5.5 Expected Results
+### 6.5 Expected Results
 
 **If features capture genuine reasoning:**
 - Positive $\gamma$ should improve accuracy
@@ -288,7 +478,7 @@ Unlike previous approaches that steered all top-k features simultaneously, we no
 - Positive $\gamma$ may decrease accuracy (outputs look reasoning-like but aren't)
 - No consistent relationship between $\gamma$ and performance
 
-### 5.6 Output Structure
+### 6.6 Output Structure
 
 Results are saved per-feature:
 ```
@@ -299,7 +489,7 @@ Results are saved per-feature:
     └── result_gamma_{value}.json  # Detailed results for each gamma
 ```
 
-### 5.7 Usage
+### 6.7 Usage
 
 ```bash
 # Run steering experiment (each feature individually)
@@ -313,9 +503,9 @@ python reasoning_features/scripts/run_steering_experiment.py \
 
 ---
 
-## 6. Limitations and Future Work
+## 7. Limitations and Future Work
 
-### 6.1 Current Limitations
+### 7.1 Current Limitations
 
 1. **Token set selection:** Token dependency analysis depends on which tokens we classify as most activating. Different selections may yield different results.
 
@@ -325,7 +515,7 @@ python reasoning_features/scripts/run_steering_experiment.py \
 
 4. **Injection strategy effects:** Different injection strategies may yield different results; prepending tends to work best but may not reflect natural token distributions.
 
-### 6.2 Future Directions
+### 7.2 Future Directions
 
 1. **Gradient-based attribution:** Use input gradients to identify which tokens causally drive feature activations.
 

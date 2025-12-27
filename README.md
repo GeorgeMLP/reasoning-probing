@@ -211,7 +211,107 @@ Cohen's d thresholds (0.2, 0.5, 0.8) are well-established conventions in psychol
 
 Combined with t-test p-values (α = 0.01 for large/medium effects, α = 0.05 for small effects), this provides rigorous statistical classification.
 
-## Experiment 3: Steering Experiments
+## Experiment 3: LLM-Guided Feature Interpretation
+
+**Addressing the limitation of token injection**: While token injection effectively identifies features driven by simple lexical patterns, it cannot exhaust all possible linguistic confounds. A feature classified as "context-dependent" might still be a confound (e.g., detecting prose sophistication, syntactic complexity, or formal style) rather than genuine reasoning.
+
+### Approach
+
+We use an intelligent LLM (Google Gemini 2.0 Flash) to systematically probe feature behavior through iterative hypothesis testing:
+
+1. **Hypothesis Generation**: LLM analyzes high-activation examples and top tokens to hypothesize what linguistic pattern the feature detects
+
+2. **Counterexample Generation**: LLM generates two types of test cases:
+   - **False positives**: Non-reasoning text predicted to activate the feature
+   - **False negatives**: Reasoning text predicted to NOT activate the feature
+
+3. **Empirical Testing**: Each candidate is tested against the actual model to validate predictions
+
+4. **Iterative Refinement**: Results from previous iterations inform subsequent generation
+
+5. **Final Classification**: LLM determines if feature is a genuine reasoning detector or a linguistic confound
+
+### Example: Feature 715 Discovery
+
+Token injection classified Feature 715 (Layer 16) as "context-dependent" with d=0.18. LLM analysis revealed:
+
+**True nature**: Prose sophistication/complexity detector
+- Activates on: Formal writing, complex sentences (>20 words), abstract vocabulary
+- Does NOT activate on: Casual language, simple syntax—even when expressing reasoning
+
+**Counterexamples found**:
+- 5 false positives (formal non-reasoning text activated)
+- 4 false negatives (casual reasoning did not activate)
+
+This demonstrates the feature is a **confound**, not a reasoning detector—a discovery impossible with token injection alone.
+
+### Key Advantages
+
+| Advantage | Description |
+|-----------|-------------|
+| **Systematic coverage** | Tests diverse patterns beyond manual heuristics |
+| **Scalable** | Analyzes hundreds of features automatically |
+| **Explainable** | Generates human-interpretable feature descriptions |
+| **Iterative** | Learns from failures to improve hypothesis testing |
+
+### Usage
+
+```bash
+# Analyze context-dependent features from injection results
+python reasoning_features/scripts/analyze_feature_interpretation.py \
+    --injection-results results/layer16/injection_results.json \
+    --token-analysis results/layer16/token_analysis.json \
+    --layer 16 \
+    --mode context_dependent \
+    --output results/layer16/feature_interpretations.json
+
+# Analyze all reasoning features
+python reasoning_features/scripts/analyze_feature_interpretation.py \
+    --reasoning-features results/layer16/reasoning_features.json \
+    --token-analysis results/layer16/token_analysis.json \
+    --layer 16 \
+    --mode all_reasoning \
+    --output results/layer16/feature_interpretations.json
+
+# Customize parameters
+python reasoning_features/scripts/analyze_feature_interpretation.py \
+    --feature-indices 715 494 13302 \
+    --token-analysis results/layer16/token_analysis.json \
+    --layer 16 \
+    --max-iterations 5 \
+    --min-false-positives 3 \
+    --min-false-negatives 3 \
+    --threshold-ratio 0.5 \
+    --output results/layer16/feature_interpretations.json
+```
+
+### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--max-iterations` | 5 | Maximum counterexample generation rounds |
+| `--min-false-positives` | 3 | Minimum FPs to find before stopping |
+| `--min-false-negatives` | 3 | Minimum FNs to find before stopping |
+| `--threshold-ratio` | 0.5 | Activation threshold (% of max activation) |
+
+### Output
+
+Results include summary statistics and per-feature analyses:
+
+```json
+{
+  "summary": {
+    "total_features_analyzed": 20,
+    "genuine_reasoning_features": 2,
+    "non_reasoning_features": 18,
+    "high_confidence": 15,
+    "max_iterations_required": 3.5
+  },
+  "features": [...]
+}
+```
+
+## Experiment 4: Steering Experiments
 
 Test whether amplifying "reasoning features" actually improves performance on reasoning benchmarks.
 
