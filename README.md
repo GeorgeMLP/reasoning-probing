@@ -447,8 +447,12 @@ Plot categories: `--only-layer-stats`, `--only-distributions`, `--only-token`, `
 ## Installation
 
 ```bash
-conda create -n probing python=3.10
+conda create -n probing python=3.11
 conda activate probing
+pip install -e .
+pip install vllm --extra-index-url https://download.pytorch.org/whl/cu129
+pip uninstall transformer-lens
+cd TransformerLens
 pip install -e .
 ```
 

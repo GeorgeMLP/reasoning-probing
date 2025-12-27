@@ -782,9 +782,9 @@ def main():
     parser.add_argument("--reasoning-dataset", type=str, default="s1k",
                         choices=["s1k", "general_inquiry_cot", "combined"],
                         help="Reasoning dataset to use")
-    parser.add_argument("--model-name", type=str, default="google/gemma-2-9b")
-    parser.add_argument("--sae-name", type=str, default="gemma-scope-9b-pt-res-canonical")
-    parser.add_argument("--sae-id-format", type=str, default="layer_{layer}/width_16k/canonical")
+    parser.add_argument("--model-name", type=str, default="google/gemma-3-4b-it")
+    parser.add_argument("--sae-name", type=str, default="gemma-scope-4b-it-res-all")
+    parser.add_argument("--sae-id-format", type=str, default="layer_{layer}_width_16k_l0_small")
     parser.add_argument("--save-dir", type=str, required=True)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--batch-size", type=int, default=16,

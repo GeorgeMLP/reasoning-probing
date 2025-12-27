@@ -4,13 +4,6 @@ from .base import BaseDataset, TextSample
 from .pile import PileDataset
 from .reasoning import S1KDataset, GeneralInquiryCoTDataset, get_reasoning_dataset
 from .benchmarks import AIME24Benchmark, GPQADiamondBenchmark, MATH500Benchmark, get_benchmark
-from .anova import (
-    ANOVAResult,
-    compute_anova_for_feature,
-    compute_anova_summary,
-    load_all_top_tokens,
-    split_into_sentences,
-)
 
 
 __all__ = [
@@ -24,9 +17,4 @@ __all__ = [
     "GPQADiamondBenchmark",
     "MATH500Benchmark",
     "get_benchmark",
-    "ANOVAResult",
-    "compute_anova_for_feature",
-    "compute_anova_summary",
-    "load_all_top_tokens",
-    "split_into_sentences",
 ]

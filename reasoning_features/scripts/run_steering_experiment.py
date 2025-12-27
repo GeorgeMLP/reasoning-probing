@@ -85,17 +85,17 @@ def parse_args():
     # Model configuration
     parser.add_argument(
         "--model-name",
-        default="google/gemma-2-9b",
-        help="HuggingFace model name (default: google/gemma-2-9b)",
+        default="google/gemma-3-4b-it",
+        help="HuggingFace model name (default: google/gemma-3-4b-it)",
     )
     parser.add_argument(
         "--sae-name",
-        default="gemma-scope-9b-pt-res-canonical",
-        help="SAE release name (default: gemma-scope-9b-pt-res-canonical)",
+        default="gemma-scope-4b-it-res-all",
+        help="SAE release name (default: gemma-scope-4b-it-res-all)",
     )
     parser.add_argument(
         "--sae-id-format",
-        default="layer_{layer}/width_16k/canonical",
+        default="layer_{layer}_width_16k_l0_small",
         help="SAE ID format string",
     )
     parser.add_argument(
