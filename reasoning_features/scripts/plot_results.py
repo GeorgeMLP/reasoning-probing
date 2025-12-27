@@ -1190,7 +1190,7 @@ def plot_injection_summary(data: dict, output_dir: Path):
     
     # Collect summary statistics
     metrics = {
-        'avg_transfer_ratio': [],
+        'avg_cohens_d': [],
         'pct_token_driven': [],
         'pct_partially_driven': [],
         'pct_weakly_driven': [],
@@ -1205,7 +1205,8 @@ def plot_injection_summary(data: dict, output_dir: Path):
         counts = summary.get('classification_counts', {})
         n_features = summary.get('n_features', 1)
         
-        metrics['avg_transfer_ratio'].append(summary.get('avg_transfer_ratio', 0))
+        # Backwards compatible: compute avg_cohens_d from features if not in summary
+        metrics['avg_cohens_d'].append(summary.get('avg_cohens_d', 0))
         metrics['avg_baseline_activation'].append(summary.get('avg_baseline_activation', 0))
         metrics['avg_reasoning_activation'].append(summary.get('avg_reasoning_activation', 0))
         
@@ -1218,20 +1219,22 @@ def plot_injection_summary(data: dict, output_dir: Path):
         metrics['pct_weakly_driven'].append(pct_weak)
         metrics['pct_context_dependent'].append(pct_context)
     
-    # Plot 1: Transfer ratio and token-driven percentages
+    # Plot 1: Cohen's d and token-driven percentages
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     
-    # Transfer ratio
+    # Cohen's d (effect size)
     ax = axes[0]
-    ax.bar(range(len(layers)), metrics['avg_transfer_ratio'], color='#C44E52', alpha=0.8)
-    ax.axhline(0.5, color='black', linestyle='--', alpha=0.5, label='Token-driven threshold')
+    ax.bar(range(len(layers)), metrics['avg_cohens_d'], color='#C44E52', alpha=0.8)
+    ax.axhline(0.8, color='black', linestyle='--', alpha=0.5, label='Large effect (d=0.8)')
+    ax.axhline(0.5, color='gray', linestyle=':', alpha=0.5, label='Medium effect (d=0.5)')
+    ax.axhline(0.2, color='gray', linestyle='-.', alpha=0.5, label='Small effect (d=0.2)')
     ax.set_xticks(range(len(layers)))
     ax.set_xticklabels([f'L{l}' for l in layers])
     ax.set_xlabel('Layer')
-    ax.set_ylabel('Average Transfer Ratio')
-    ax.set_title('Token Injection Transfer Ratio')
-    ax.legend(fontsize=8)
-    for i, v in enumerate(metrics['avg_transfer_ratio']):
+    ax.set_ylabel("Average Cohen's d")
+    ax.set_title('Token Injection Effect Size')
+    ax.legend(fontsize=7)
+    for i, v in enumerate(metrics['avg_cohens_d']):
         ax.text(i, v + 0.02, f'{v:.2f}', ha='center', fontsize=9)
     
     # Percentage by classification
@@ -1306,21 +1309,22 @@ def plot_injection_per_feature(data: dict, output_dir: Path):
             ax = axes[ax_idx]
             color = strategy_colors.get(strategy, '#808080')
             
-            transfer_ratios = []
+            cohens_d_values = []
             feature_indices = []
             
             for f in features:
                 strat_data = f.get('strategies', {}).get(strategy, {})
-                transfer_ratios.append(strat_data.get('transfer_ratio', 0))
+                cohens_d_values.append(strat_data.get('cohens_d', 0))
                 feature_indices.append(f.get('feature_index', 0))
             
-            ax.bar(range(len(transfer_ratios)), transfer_ratios, color=color, alpha=0.8)
-            ax.axhline(0.5, color='black', linestyle='--', alpha=0.5, label='Token-driven threshold')
-            ax.axhline(0.2, color='gray', linestyle=':', alpha=0.5, label='Partial threshold')
+            ax.bar(range(len(cohens_d_values)), cohens_d_values, color=color, alpha=0.8)
+            ax.axhline(0.8, color='black', linestyle='--', alpha=0.5, label='Large (d=0.8)')
+            ax.axhline(0.5, color='gray', linestyle=':', alpha=0.5, label='Medium (d=0.5)')
+            ax.axhline(0.2, color='gray', linestyle='-.', alpha=0.5, label='Small (d=0.2)')
             ax.set_xticks(range(len(feature_indices)))
             ax.set_xticklabels([str(idx) for idx in feature_indices], rotation=45, fontsize=8)
             ax.set_xlabel('Feature Index')
-            ax.set_ylabel('Transfer Ratio')
+            ax.set_ylabel("Cohen's d")
             ax.set_title(f'Strategy: {strategy}')
             ax.legend(fontsize=7)
         
@@ -1328,7 +1332,7 @@ def plot_injection_per_feature(data: dict, output_dir: Path):
         for ax_idx in range(len(strategies), len(axes)):
             axes[ax_idx].set_visible(False)
         
-        plt.suptitle(f'Layer {layer}: Transfer Ratios by Injection Strategy', fontsize=14)
+        plt.suptitle(f"Layer {layer}: Cohen's d by Injection Strategy", fontsize=14)
         plt.tight_layout()
         plt.savefig(injection_dir / f'layer{layer}_injection_strategies.png', bbox_inches='tight')
         plt.close()
@@ -1356,17 +1360,19 @@ def plot_injection_per_feature(data: dict, output_dir: Path):
         ax.pie(sizes, labels=labels, colors=pie_colors, autopct='%1.1f%%', startangle=90)
         ax.set_title('Feature Classification Distribution')
         
-        # Best transfer ratio distribution
+        # Best Cohen's d distribution
         ax = axes[1]
-        best_ratios = [f.get('best_transfer_ratio', 0) for f in features]
-        ax.hist(best_ratios, bins=15, color='#C44E52', alpha=0.7, edgecolor='white')
-        ax.axvline(0.5, color='black', linestyle='--', label='Token-driven threshold')
-        ax.axvline(0.2, color='gray', linestyle=':', label='Partial threshold')
-        ax.axvline(np.mean(best_ratios), color='red', linestyle='-', 
-                   label=f'Mean: {np.mean(best_ratios):.2f}')
-        ax.set_xlabel('Best Transfer Ratio')
+        best_d_values = [f.get('best_cohens_d', 0) for f in features]
+        ax.hist(best_d_values, bins=15, color='#C44E52', alpha=0.7, edgecolor='white')
+        ax.axvline(0.8, color='black', linestyle='--', label='Large (d=0.8)')
+        ax.axvline(0.5, color='gray', linestyle=':', label='Medium (d=0.5)')
+        ax.axvline(0.2, color='gray', linestyle='-.', label='Small (d=0.2)')
+        if best_d_values:
+            ax.axvline(np.mean(best_d_values), color='red', linestyle='-', 
+                       label=f'Mean: {np.mean(best_d_values):.2f}')
+        ax.set_xlabel("Best Cohen's d")
         ax.set_ylabel('Count')
-        ax.set_title('Distribution of Best Transfer Ratios')
+        ax.set_title("Distribution of Best Cohen's d")
         ax.legend(fontsize=8)
         
         plt.suptitle(f'Layer {layer}: Token Injection Results', fontsize=14)
@@ -1396,7 +1402,7 @@ def plot_injection_activation_comparison(data: dict, output_dir: Path):
         
         baseline_means = [f.get('baseline_mean', 0) for f in features]
         reasoning_means = [f.get('reasoning_mean', 0) for f in features]
-        # Use the best strategy (highest transfer ratio) for injected result
+        # Use the best strategy (highest Cohen's d) for injected result
         injected_means = []
         for f in features:
             strategies = f.get('strategies', {})

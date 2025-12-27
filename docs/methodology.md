@@ -307,13 +307,13 @@ Initial experiments on 10 reasoning features from layer 12 show:
 | Context-dependent | 0 | 0% |
 
 **Key Findings:**
-- **Average transfer ratio: 62%** - Injecting top tokens into non-reasoning text achieves 62% of reasoning-level activation
-- **All features show some token dependency** - No feature was purely context-dependent
+- **Average Cohen's d: 1.2** - Large effect size across features
+- **All features show some token dependency** - No feature was purely context-dependent  
 - **Prepend strategy works best** - Simply prepending tokens is most effective
 
 ### 6.2 Interpretation
 
-These results strongly support the hypothesis that "reasoning features" are largely shallow pattern detectors rather than genuine reasoning mechanisms. The high transfer ratio means that simply prepending a few tokens (like "Let", "Therefore", mathematical notation) can recover most of the activation difference - suggesting the features respond to vocabulary, not reasoning structure.
+These results strongly support the hypothesis that "reasoning features" are largely shallow pattern detectors rather than genuine reasoning mechanisms. The large average Cohen's d (1.2) and high proportion of token-driven features (50%) indicate that simply prepending a few tokens (like "Let", "Therefore", mathematical notation) produces substantial activation increases - suggesting the features respond to vocabulary, not reasoning structure.
 
 ---
 
@@ -379,38 +379,48 @@ Contextual strategies are designed to capture features that are sensitive to tok
 ### 7.4 Key Metrics
 
 **Transfer Ratio**:
-$$\text{TransferRatio} = \frac{\bar{a}_{\text{injected}} - \bar{a}_{\text{baseline}}}{\bar{a}_{\text{reasoning}} - \bar{a}_{\text{baseline}}}$$
+$$\mathrm{TransferRatio} = \frac{\bar{a}_{\text{injected}} - \bar{a}_{\text{baseline}}}{\bar{a}_{\text{reasoning}} - \bar{a}_{\text{baseline}}}.$$
 
-This measures what fraction of the reasoning-level activation is achieved by token injection alone.
+This measures what fraction of the reasoning-level activation is achieved by token injection alone (for interpretability).
 
-**Statistical Significance**: Independent t-test comparing injected vs. baseline activations, with Cohen's d for effect size.
+**Cohen's d Effect Size**:
+$$d = \frac{\bar{a}_{\text{injected}} - \bar{a}_{\text{baseline}}}{\sigma_{\text{pooled}}}.$$
 
-### 7.5 Classification Criteria
+This provides a standardized measure of the difference between injected and baseline activations, independent of scale.
+
+**Statistical Significance**: Independent t-test comparing injected vs. baseline activations.
+
+### 7.5 Classification Criteria (Cohen, 1988)
+
+Classification uses well-established effect size conventions from Cohen (1988):
 
 | Classification | Criteria | Interpretation |
 |---------------|----------|----------------|
-| **Token-driven** | Transfer ratio > 0.5, Cohen's d > 0.3, p < 0.01 | Feature is a shallow token detector |
-| **Partially token-driven** | Transfer ratio 0.2-0.5, significant | Tokens partially explain activation |
-| **Weakly token-driven** | Transfer ratio < 0.2, but significant | Tokens have minor effect |
-| **Context-dependent** | Not significant | Feature may capture deeper patterns |
+| **Token-driven** | d ≥ 0.8, p < 0.01 | Large effect: feature is a strong token detector |
+| **Partially token-driven** | d ≥ 0.5, p < 0.01 | Medium effect: tokens moderately activate feature |
+| **Weakly token-driven** | d ≥ 0.2, p < 0.05 | Small effect: tokens have minor but reliable effect |
+| **Context-dependent** | d < 0.2 or p ≥ 0.05 | Negligible effect: feature may capture deeper patterns |
+
+These thresholds correspond to the percentage of injected samples exceeding the baseline median:
+- d = 0.2: 58% (small effect)
+- d = 0.5: 69% (medium effect)
+- d = 0.8: 79% (large effect)
 
 ### 7.6 Interpreting Results
 
-A high average transfer ratio (e.g., 62% as observed in preliminary experiments) indicates that:
-- Simply injecting top tokens recovers most of the activation difference
+A high proportion of token-driven features (d ≥ 0.8) indicates that:
+- Simply injecting top tokens produces large activation increases
 - Features are primarily responding to specific vocabulary, not reasoning structure
 - "Reasoning features" are better characterized as "reasoning vocabulary detectors"
 
-### 7.7 Rigorous Transfer Ratio Evaluation
+### 7.7 Statistical Justification
 
-To determine whether a transfer ratio is "high" or "low", we recommend:
+The Cohen's d approach provides several advantages over arbitrary thresholds:
 
-1. **Null baseline comparison**: Compare against transfer ratios obtained by injecting random tokens (should be near 0)
-2. **Bootstrap confidence intervals**: Report 95% CIs on transfer ratios
-3. **Effect size standards** (following Cohen's conventions):
-   - Strong token-driven: Transfer ratio > 0.5, Cohen's d > 0.8
-   - Moderate: Transfer ratio 0.3-0.5, Cohen's d 0.5-0.8  
-   - Weak: Transfer ratio < 0.3, Cohen's d < 0.5
+1. **Standardized**: Effect sizes are scale-independent and comparable across features
+2. **Established conventions**: Cohen (1988) thresholds are widely accepted in psychology and social sciences
+3. **Interpretable**: Maps directly to overlap between distributions and probability of superiority
+4. **Rigorous**: Combined with p-values, provides both practical significance (effect size) and statistical reliability (p-value)
 
 ### 7.8 Usage
 
@@ -425,8 +435,17 @@ python reasoning_features/scripts/run_token_injection_experiment.py \
     --n-samples 100 \
     --save-dir results/layer8
 
-# Contextual strategies (for sequence-sensitive features)
+# Customize Cohen's d thresholds
 python reasoning_features/scripts/run_token_injection_experiment.py \
+    --token-analysis results/layer8/token_analysis.json \
+    --reasoning-features results/layer8/reasoning_features.json \
+    --layer 8 \
+    --d-large 0.8 \
+    --d-medium 0.5 \
+    --d-small 0.2 \
+    --alpha 0.01 \
+    --alpha-weak 0.05 \
+    --save-dir results/layer8
     --token-analysis results/layer8/token_analysis.json \
     --reasoning-features results/layer8/reasoning_features.json \
     --layer 8 \

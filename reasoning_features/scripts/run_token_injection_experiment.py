@@ -14,8 +14,7 @@ should activate the feature.
 
 ## Key Metrics
 
-- **Cohen's d (Effect Size)**: Primary metric for classification
-- **Transfer Ratio**: (Injected activation) / (Reasoning activation) - interpretable secondary metric
+- **Cohen's d (Effect Size)**: Standardized mean difference between injected and baseline activations
 - **Statistical Significance**: t-test p-value with appropriate alpha levels
 
 ## Classification (Based on Cohen's d, 1988)
@@ -681,21 +680,7 @@ def run_injection_experiment(
         
         # Compute metrics
         activation_increase = np.mean(injected_acts) - np.mean(baseline_acts)
-        
-        # Transfer ratio: how much of reasoning-level activation does injection achieve?
-        # Use baseline_std as minimum gap to avoid division by near-zero
-        reasoning_gap = results["reasoning_mean"] - results["baseline_mean"]
         baseline_std = results["baseline_std"]
-        min_gap = max(baseline_std, 0.01)  # Use baseline variability as minimum meaningful gap
-        
-        if reasoning_gap > min_gap:
-            transfer_ratio = activation_increase / reasoning_gap
-        elif reasoning_gap > 0:
-            # Small gap case: cap transfer ratio at 1.0 if increase exceeds gap
-            transfer_ratio = min(activation_increase / max(reasoning_gap, 0.001), 1.0)
-        else:
-            # No gap or negative gap: use normalized increase
-            transfer_ratio = activation_increase / min_gap if activation_increase > 0 else 0.0
         
         # Statistical test: is injection activation significantly higher than baseline?
         t_stat, p_value = stats.ttest_ind(injected_acts, baseline_acts)
@@ -718,11 +703,9 @@ def run_injection_experiment(
             "injected_std": float(np.std(injected_acts)),
             "injected_nonzero_frac": float(np.mean(injected_acts > nonzero_threshold)),
             "activation_increase": float(activation_increase),
-            "transfer_ratio": float(transfer_ratio),
             "t_statistic": float(t_stat),
             "p_value": float(p_value),
             "cohens_d": float(cohens_d),
-            # Updated: use effect size based significance
             "significant": bool(is_small_effect),
             "is_large_effect": bool(is_large_effect),
             "is_medium_effect": bool(is_medium_effect),
@@ -731,16 +714,12 @@ def run_injection_experiment(
     
     results["strategies"] = strategy_results
     
-    # Overall assessment - find best strategy by Cohen's d (primary) and transfer ratio (secondary)
-    best_strategy_by_d = max(strategy_results.keys(), 
-                             key=lambda s: strategy_results[s]["cohens_d"])
-    best_strategy_by_transfer = max(strategy_results.keys(), 
-                                    key=lambda s: strategy_results[s]["transfer_ratio"])
+    # Overall assessment - find best strategy by Cohen's d (effect size)
+    best_strategy = max(strategy_results.keys(), 
+                        key=lambda s: strategy_results[s]["cohens_d"])
     
-    # Use strategy with best effect size for classification
-    best_d = strategy_results[best_strategy_by_d]["cohens_d"]
-    best_p = strategy_results[best_strategy_by_d]["p_value"]
-    best_transfer = strategy_results[best_strategy_by_transfer]["transfer_ratio"]
+    best_d = strategy_results[best_strategy]["cohens_d"]
+    best_p = strategy_results[best_strategy]["p_value"]
     
     # Classification based on Cohen's d effect size conventions (Cohen, 1988)
     # This provides statistically principled thresholds:
@@ -763,9 +742,7 @@ def run_injection_experiment(
     
     results["classification"] = classification
     results["interpretation"] = interpretation
-    results["best_strategy"] = best_strategy_by_d
-    results["best_strategy_by_transfer"] = best_strategy_by_transfer
-    results["best_transfer_ratio"] = best_transfer
+    results["best_strategy"] = best_strategy
     results["best_cohens_d"] = best_d
     results["best_p_value"] = best_p
     
@@ -1026,8 +1003,7 @@ def main():
         # Print summary
         print(f"    Baseline activation: {result['baseline_mean']:.3f}")
         print(f"    Reasoning activation: {result['reasoning_mean']:.3f}")
-        print(f"    Best Cohen's d: {result['best_cohens_d']:.3f}")
-        print(f"    Best transfer ratio: {result['best_transfer_ratio']:.3f}")
+        print(f"    Best Cohen's d: {result['best_cohens_d']:.3f} (p={result['best_p_value']:.2e})")
         print(f"    Classification: {result['classification']}")
     
     # Summary
@@ -1041,10 +1017,8 @@ def main():
         pct = 100 * count / len(classifications) if classifications else 0
         print(f"  {cls}: {count} ({pct:.1f}%)")
     
-    avg_transfer = np.mean([r["best_transfer_ratio"] for r in all_results])
     avg_cohens_d = np.mean([r["best_cohens_d"] for r in all_results])
-    print(f"\n  Average best transfer ratio: {avg_transfer:.3f}")
-    print(f"  Average best Cohen's d: {avg_cohens_d:.3f}")
+    print(f"\n  Average best Cohen's d: {avg_cohens_d:.3f}")
     
     # Save results
     save_path = Path(args.save_dir)
@@ -1076,7 +1050,6 @@ def main():
                 for cls in ["token_driven", "partially_token_driven", 
                             "weakly_token_driven", "context_dependent"]
             },
-            "avg_transfer_ratio": float(avg_transfer),
             "avg_cohens_d": float(avg_cohens_d),
             "avg_baseline_activation": float(np.mean([r["baseline_mean"] for r in all_results])),
             "avg_reasoning_activation": float(np.mean([r["reasoning_mean"] for r in all_results])),

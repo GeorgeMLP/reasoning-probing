@@ -592,7 +592,7 @@ def generate_html_for_feature(
     """
     
     feat_idx = feature_data["feature_index"]
-    transfer_ratio = feature_data["best_transfer_ratio"]
+    cohens_d = feature_data.get("best_cohens_d", 0)
     classification = feature_data["classification"]
     best_strategy = feature_data["best_strategy"]
     
@@ -807,8 +807,8 @@ def generate_html_for_feature(
                 </span>
             </div>
             <div class="metadata-item">
-                <span class="metadata-label">Transfer Ratio</span>
-                <span class="metadata-value">{transfer_ratio:.3f}</span>
+                <span class="metadata-label">Cohen's d</span>
+                <span class="metadata-value">{cohens_d:.3f}</span>
             </div>
             <div class="metadata-item">
                 <span class="metadata-label">Best Strategy</span>
@@ -1000,14 +1000,14 @@ def main():
         print("No features found")
         return
     
-    # Sort by transfer ratio and take top N
-    features_sorted = sorted(features, key=lambda f: f.get("best_transfer_ratio", 0), reverse=True)
+    # Sort by Cohen's d and take top N
+    features_sorted = sorted(features, key=lambda f: f.get("best_cohens_d", 0), reverse=True)
     top_features = features_sorted[:args.n_features]
     
     print(f"\nVisualizing top {len(top_features)} features:")
     for f in top_features:
         print(f"  Feature {f['feature_index']}: "
-              f"transfer={f['best_transfer_ratio']:.3f}, "
+              f"d={f.get('best_cohens_d', 0):.3f}, "
               f"class={f['classification']}")
     
     # Load model and SAE
@@ -1269,14 +1269,14 @@ def main():
     
     for feature_data in processed_features:
         feat_idx = feature_data["feature_index"]
-        transfer_ratio = feature_data["best_transfer_ratio"]
+        cohens_d = feature_data.get("best_cohens_d", 0)
         classification = feature_data["classification"].replace("_", " ").title()
         
         index_html += f"""
         <div class="feature-card">
             <div class="feature-title">Feature {feat_idx}</div>
             <div class="feature-meta">
-                Transfer Ratio: {transfer_ratio:.3f}<br>
+                Cohen's d: {cohens_d:.3f}<br>
                 Classification: {classification}
             </div>
             <a href="feature_{feat_idx}.html" class="view-button">View Activations →</a>

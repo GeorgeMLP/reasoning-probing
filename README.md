@@ -285,16 +285,20 @@ Contextual strategies are crucial for detecting features that activate on token 
 
 | Metric | Description | Interpretation |
 |--------|-------------|----------------|
-| **Transfer Ratio** | (Injected activation) / (Reasoning activation) | High = token-driven |
-| **Activation Increase** | Post-injection - pre-injection | Significant = tokens matter |
+| **Cohen's d** | Standardized effect size (injected vs baseline) | High = token-driven |
+| **p-value** | Statistical significance of activation difference | Low = reliable effect |
+| **Transfer Ratio** | (Injected activation) / (Reasoning activation) | Interpretability metric |
 
-### Classification
+### Classification (Based on Cohen's d, 1988)
+
+Classification uses well-established effect size conventions from Cohen (1988), providing statistically principled thresholds:
 
 | Classification | Criteria | Interpretation |
 |---------------|----------|----------------|
-| **Token-driven** | Transfer ratio > 0.5, significant | Shallow pattern detector |
-| **Partially token-driven** | Transfer ratio 0.2-0.5 | Mixed behavior |
-| **Context-dependent** | Transfer ratio < 0.2 | May capture reasoning structure |
+| **Token-driven** | d ≥ 0.8, p < 0.01 | Large effect: tokens strongly activate feature |
+| **Partially token-driven** | d ≥ 0.5, p < 0.01 | Medium effect: tokens moderately activate feature |
+| **Weakly token-driven** | d ≥ 0.2, p < 0.05 | Small effect: tokens weakly activate feature |
+| **Context-dependent** | d < 0.2 or p ≥ 0.05 | Negligible effect: may capture reasoning structure |
 
 ### Usage
 
@@ -329,25 +333,31 @@ python reasoning_features/scripts/visualize_injection_features.py \
 
 This creates interactive HTML visualizations showing:
 - **Token-level activations** with color-coded backgrounds (darker = higher activation)
-- **Comparison across conditions**: baseline, reasoning, and injected (all 3 strategies)
-- **Feature metadata**: transfer ratio, classification, best strategy
+- **Comparison across conditions**: baseline, reasoning, and injected (all strategies)
+- **Feature metadata**: Cohen's d, p-value, transfer ratio, classification, best strategy
 - Multiple example texts per condition
 
 ### Interpretation
 
 | Result | Implication |
 |--------|-------------|
-| Most features token-driven | Supports hypothesis: features are shallow |
-| Most features context-dependent | Against hypothesis: features may capture reasoning |
+| Most features token-driven (d ≥ 0.8) | Supports hypothesis: features are shallow |
+| Most features context-dependent (d < 0.2) | Against hypothesis: features may capture reasoning |
 
-### Preliminary Results
+### Statistical Justification
 
-In layer 12 of Gemma-2-9B:
-- **62% average transfer ratio** - Injecting tokens achieves ~62% of reasoning-level activation
-- **50% token-driven** - Half of features strongly respond to token injection
-- **0% context-dependent** - No features are purely context-sensitive
+The classification uses **Cohen's d effect size**, a standardized measure of the difference between two means:
 
-These results support our hypothesis that "reasoning features" are shallow pattern detectors.
+```
+d = (μ_injected - μ_baseline) / σ_pooled
+```
+
+Cohen's d thresholds (0.2, 0.5, 0.8) are well-established conventions in psychology and social sciences (Cohen, 1988), making them defensible for reviewers:
+- **d = 0.2**: 58% of injected samples exceed baseline median (small effect)
+- **d = 0.5**: 69% of injected samples exceed baseline median (medium effect)  
+- **d = 0.8**: 79% of injected samples exceed baseline median (large effect)
+
+Combined with t-test p-values (α = 0.01 for large/medium effects, α = 0.05 for small effects), this provides rigorous statistical classification.
 
 ## Visualization
 
