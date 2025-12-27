@@ -14,19 +14,40 @@ should activate the feature.
 
 ## Key Metrics
 
-- **Activation Increase**: How much does injection increase activation?
-- **Transfer Ratio**: (Injected activation) / (Reasoning activation)
-- **Injection Effectiveness**: Does injection achieve reasoning-level activation?
+- **Cohen's d (Effect Size)**: Primary metric for classification
+- **Transfer Ratio**: (Injected activation) / (Reasoning activation) - interpretable secondary metric
+- **Statistical Significance**: t-test p-value with appropriate alpha levels
+
+## Classification (Based on Cohen's d, 1988)
+
+The classification uses well-established effect size conventions from Cohen (1988),
+providing statistically principled and reviewable thresholds:
+
+- **token_driven** (Large effect, d >= 0.8, p < 0.01):
+  79% of injected samples exceed baseline median.
+  Feature strongly activates on tokens alone.
+
+- **partially_token_driven** (Medium effect, 0.5 <= d < 0.8, p < 0.01):
+  69% of injected samples exceed baseline median.
+  Feature moderately activates on tokens.
+
+- **weakly_token_driven** (Small effect, 0.2 <= d < 0.5, p < 0.05):
+  58% of injected samples exceed baseline median.
+  Feature weakly activates on tokens.
+
+- **context_dependent** (Negligible effect, d < 0.2 or p >= 0.05):
+  Token injection does not meaningfully increase activation.
+  Feature may capture deeper reasoning patterns or context.
 
 ## Interpretation
 
-If feature is TOKEN-DRIVEN:
-- Injection should significantly increase activation
-- Transfer ratio should be high (>0.5)
+If feature is TOKEN-DRIVEN (large effect size):
+- Injection significantly increases activation
+- Feature likely detects surface patterns, not reasoning
 
-If feature captures REASONING STRUCTURE:
-- Injection may not significantly increase activation
-- Transfer ratio will be low (<0.2)
+If feature captures REASONING STRUCTURE (small/negligible effect):
+- Injection does not significantly increase activation
+- Feature may detect genuine reasoning patterns
 
 ## Usage
 
@@ -36,6 +57,14 @@ python run_token_injection_experiment.py \\
     --reasoning-features results/layer8/reasoning_features.json \\
     --layer 8 \\
     --top-k-features 10 \\
+    --save-dir results/layer8/injection
+
+# Custom effect size thresholds (defaults are Cohen's conventions)
+python run_token_injection_experiment.py \\
+    --token-analysis results/layer8/token_analysis.json \\
+    --reasoning-features results/layer8/reasoning_features.json \\
+    --layer 8 \\
+    --d-large 0.8 --d-medium 0.5 --d-small 0.2 \\
     --save-dir results/layer8/injection
 ```
 """
@@ -544,6 +573,12 @@ def run_injection_experiment(
     top_trigrams: Optional[list[str]] = None,
     batch_size: int = 16,
     max_length: int = 128,
+    # Effect size thresholds for classification (Cohen's d conventions)
+    d_large: float = 0.8,       # Large effect threshold
+    d_medium: float = 0.5,      # Medium effect threshold
+    d_small: float = 0.2,       # Small effect threshold
+    alpha: float = 0.01,        # Significance level for large/medium effects
+    alpha_weak: float = 0.05,   # Significance level for weak effects
 ) -> dict:
     """Run token injection experiment for a single feature.
     
@@ -586,9 +621,14 @@ def run_injection_experiment(
         model, sae, tokenizer, nonreasoning_texts, layer, feature_index, device,
         batch_size=batch_size, max_length=max_length
     )
-    results["baseline_mean"] = float(np.mean(baseline_acts))
-    results["baseline_std"] = float(np.std(baseline_acts))
-    results["baseline_nonzero_frac"] = float(np.mean(baseline_acts > 0.1))
+    baseline_mean = float(np.mean(baseline_acts))
+    baseline_std = float(np.std(baseline_acts))
+    # Use relative threshold for nonzero: activation > 0.5 std above mean
+    nonzero_threshold = max(baseline_std * 0.5, 0.01)
+    
+    results["baseline_mean"] = baseline_mean
+    results["baseline_std"] = baseline_std
+    results["baseline_nonzero_frac"] = float(np.mean(baseline_acts > nonzero_threshold))
     
     # Target: activation on reasoning text
     reasoning_acts = get_feature_activation(
@@ -597,7 +637,7 @@ def run_injection_experiment(
     )
     results["reasoning_mean"] = float(np.mean(reasoning_acts))
     results["reasoning_std"] = float(np.std(reasoning_acts))
-    results["reasoning_nonzero_frac"] = float(np.mean(reasoning_acts > 0.1))
+    results["reasoning_nonzero_frac"] = float(np.mean(reasoning_acts > nonzero_threshold))
     
     # Test each injection strategy
     strategy_results = {}
@@ -643,57 +683,91 @@ def run_injection_experiment(
         activation_increase = np.mean(injected_acts) - np.mean(baseline_acts)
         
         # Transfer ratio: how much of reasoning-level activation does injection achieve?
+        # Use baseline_std as minimum gap to avoid division by near-zero
         reasoning_gap = results["reasoning_mean"] - results["baseline_mean"]
-        if reasoning_gap > 0.1:
+        baseline_std = results["baseline_std"]
+        min_gap = max(baseline_std, 0.01)  # Use baseline variability as minimum meaningful gap
+        
+        if reasoning_gap > min_gap:
             transfer_ratio = activation_increase / reasoning_gap
+        elif reasoning_gap > 0:
+            # Small gap case: cap transfer ratio at 1.0 if increase exceeds gap
+            transfer_ratio = min(activation_increase / max(reasoning_gap, 0.001), 1.0)
         else:
-            transfer_ratio = 0.0 if activation_increase < 0.1 else 1.0
+            # No gap or negative gap: use normalized increase
+            transfer_ratio = activation_increase / min_gap if activation_increase > 0 else 0.0
         
         # Statistical test: is injection activation significantly higher than baseline?
         t_stat, p_value = stats.ttest_ind(injected_acts, baseline_acts)
         
-        # Effect size (Cohen's d)
+        # Effect size (Cohen's d) - primary metric for classification
+        # Using pooled standard deviation (assumes equal variances)
         pooled_std = np.sqrt((np.var(injected_acts) + np.var(baseline_acts)) / 2)
         cohens_d = activation_increase / pooled_std if pooled_std > 0 else 0
+        
+        # Determine significance based on effect size thresholds
+        is_large_effect = cohens_d >= d_large and p_value < alpha
+        is_medium_effect = cohens_d >= d_medium and p_value < alpha
+        is_small_effect = cohens_d >= d_small and p_value < alpha_weak
+        
+        # Nonzero fraction using relative threshold (1 std above 0)
+        nonzero_threshold = max(baseline_std * 0.5, 0.01)
         
         strategy_results[strategy] = {
             "injected_mean": float(np.mean(injected_acts)),
             "injected_std": float(np.std(injected_acts)),
-            "injected_nonzero_frac": float(np.mean(injected_acts > 0.1)),
+            "injected_nonzero_frac": float(np.mean(injected_acts > nonzero_threshold)),
             "activation_increase": float(activation_increase),
             "transfer_ratio": float(transfer_ratio),
             "t_statistic": float(t_stat),
             "p_value": float(p_value),
             "cohens_d": float(cohens_d),
-            "significant": bool(p_value < 0.01 and cohens_d > 0.3),
+            # Updated: use effect size based significance
+            "significant": bool(is_small_effect),
+            "is_large_effect": bool(is_large_effect),
+            "is_medium_effect": bool(is_medium_effect),
+            "is_small_effect": bool(is_small_effect),
         }
     
     results["strategies"] = strategy_results
     
-    # Overall assessment
-    best_strategy = max(strategy_results.keys(), 
-                       key=lambda s: strategy_results[s]["transfer_ratio"])
-    best_transfer = strategy_results[best_strategy]["transfer_ratio"]
-    best_significant = strategy_results[best_strategy]["significant"]
+    # Overall assessment - find best strategy by Cohen's d (primary) and transfer ratio (secondary)
+    best_strategy_by_d = max(strategy_results.keys(), 
+                             key=lambda s: strategy_results[s]["cohens_d"])
+    best_strategy_by_transfer = max(strategy_results.keys(), 
+                                    key=lambda s: strategy_results[s]["transfer_ratio"])
     
-    # Classification
-    if best_transfer > 0.5 and best_significant:
+    # Use strategy with best effect size for classification
+    best_d = strategy_results[best_strategy_by_d]["cohens_d"]
+    best_p = strategy_results[best_strategy_by_d]["p_value"]
+    best_transfer = strategy_results[best_strategy_by_transfer]["transfer_ratio"]
+    
+    # Classification based on Cohen's d effect size conventions (Cohen, 1988)
+    # This provides statistically principled thresholds:
+    # - Large effect (d ≥ 0.8): 79% of treatment exceeds control median
+    # - Medium effect (d ≥ 0.5): 69% of treatment exceeds control median
+    # - Small effect (d ≥ 0.2): 58% of treatment exceeds control median
+    
+    if best_d >= d_large and best_p < alpha:
         classification = "token_driven"
-        interpretation = "Feature activates when tokens are injected (shallow)"
-    elif best_transfer > 0.2 and best_significant:
+        interpretation = f"Large effect size (d={best_d:.2f}): tokens strongly activate feature"
+    elif best_d >= d_medium and best_p < alpha:
         classification = "partially_token_driven"
-        interpretation = "Feature partially responds to token injection"
-    elif best_significant:
+        interpretation = f"Medium effect size (d={best_d:.2f}): tokens moderately activate feature"
+    elif best_d >= d_small and best_p < alpha_weak:
         classification = "weakly_token_driven"
-        interpretation = "Tokens have small but significant effect"
+        interpretation = f"Small effect size (d={best_d:.2f}): tokens weakly activate feature"
     else:
         classification = "context_dependent"
-        interpretation = "Feature does NOT activate with token injection alone"
+        interpretation = f"Negligible effect (d={best_d:.2f}): tokens alone do not activate feature"
     
     results["classification"] = classification
     results["interpretation"] = interpretation
-    results["best_strategy"] = best_strategy
+    results["best_strategy"] = best_strategy_by_d
+    results["best_strategy_by_transfer"] = best_strategy_by_transfer
     results["best_transfer_ratio"] = best_transfer
+    results["best_cohens_d"] = best_d
+    results["best_p_value"] = best_p
     
     return results
 
@@ -706,7 +780,7 @@ def main():
                         help="Path to reasoning_features.json")
     parser.add_argument("--layer", type=int, required=True)
     parser.add_argument("--top-k-features", type=int, default=10)
-    parser.add_argument("--top-k-tokens", type=int, default=30)
+    parser.add_argument("--top-k-tokens", type=int, default=10)
     parser.add_argument("--n-inject", type=int, default=3,
                         help="Number of tokens to inject for simple strategies "
                              "(prepend, append, intersperse, replace, comma_list)")
@@ -740,10 +814,29 @@ def main():
                         help="Batch size for processing texts")
     parser.add_argument("--max-length", type=int, default=128,
                         help="Maximum sequence length for tokenization")
+    
+    # Effect size thresholds (Cohen's d conventions)
+    parser.add_argument("--d-large", type=float, default=0.8,
+                        help="Cohen's d threshold for large effect / token_driven (default: 0.8)")
+    parser.add_argument("--d-medium", type=float, default=0.5,
+                        help="Cohen's d threshold for medium effect / partially_token_driven (default: 0.5)")
+    parser.add_argument("--d-small", type=float, default=0.2,
+                        help="Cohen's d threshold for small effect / weakly_token_driven (default: 0.2)")
+    parser.add_argument("--alpha", type=float, default=0.01,
+                        help="Significance level for large/medium effects (default: 0.01)")
+    parser.add_argument("--alpha-weak", type=float, default=0.05,
+                        help="Significance level for weak effects (default: 0.05)")
+    
     args = parser.parse_args()
     
     print(f"\n{'='*60}")
     print("TOKEN INJECTION EXPERIMENT")
+    print(f"{'='*60}")
+    print(f"Classification thresholds (Cohen's d, 1988 conventions):")
+    print(f"  token_driven:           d >= {args.d_large}, p < {args.alpha}")
+    print(f"  partially_token_driven: d >= {args.d_medium}, p < {args.alpha}")
+    print(f"  weakly_token_driven:    d >= {args.d_small}, p < {args.alpha_weak}")
+    print(f"  context_dependent:      d <  {args.d_small} or p >= {args.alpha_weak}")
     print(f"{'='*60}\n")
     
     # Load feature indices
@@ -920,6 +1013,12 @@ def main():
             top_trigrams=feature_trigrams,
             batch_size=args.batch_size,
             max_length=args.max_length,
+            # Effect size thresholds
+            d_large=args.d_large,
+            d_medium=args.d_medium,
+            d_small=args.d_small,
+            alpha=args.alpha,
+            alpha_weak=args.alpha_weak,
         )
         
         all_results.append(result)
@@ -927,6 +1026,7 @@ def main():
         # Print summary
         print(f"    Baseline activation: {result['baseline_mean']:.3f}")
         print(f"    Reasoning activation: {result['reasoning_mean']:.3f}")
+        print(f"    Best Cohen's d: {result['best_cohens_d']:.3f}")
         print(f"    Best transfer ratio: {result['best_transfer_ratio']:.3f}")
         print(f"    Classification: {result['classification']}")
     
@@ -942,7 +1042,9 @@ def main():
         print(f"  {cls}: {count} ({pct:.1f}%)")
     
     avg_transfer = np.mean([r["best_transfer_ratio"] for r in all_results])
+    avg_cohens_d = np.mean([r["best_cohens_d"] for r in all_results])
     print(f"\n  Average best transfer ratio: {avg_transfer:.3f}")
+    print(f"  Average best Cohen's d: {avg_cohens_d:.3f}")
     
     # Save results
     save_path = Path(args.save_dir)
@@ -960,6 +1062,12 @@ def main():
             "active_trigram_threshold": args.active_trigram_threshold,
             "strategies": args.strategies,
             "n_samples": args.n_samples,
+            # Effect size thresholds (Cohen, 1988)
+            "d_large": args.d_large,
+            "d_medium": args.d_medium,
+            "d_small": args.d_small,
+            "alpha": args.alpha,
+            "alpha_weak": args.alpha_weak,
         },
         "summary": {
             "n_features": len(all_results),
@@ -969,6 +1077,7 @@ def main():
                             "weakly_token_driven", "context_dependent"]
             },
             "avg_transfer_ratio": float(avg_transfer),
+            "avg_cohens_d": float(avg_cohens_d),
             "avg_baseline_activation": float(np.mean([r["baseline_mean"] for r in all_results])),
             "avg_reasoning_activation": float(np.mean([r["reasoning_mean"] for r in all_results])),
         },
