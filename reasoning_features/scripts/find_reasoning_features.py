@@ -72,7 +72,7 @@ def parse_args():
     parser.add_argument(
         "--sae-name",
         default="gemma-scope-2-4b-it-res-all",
-        help="SAE release name (default: gemma-scope-4b-it-res-all)",
+        help="SAE release name (default: gemma-scope-2-4b-it-res-all)",
     )
     parser.add_argument(
         "--sae-id-format",
