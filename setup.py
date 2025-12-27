@@ -8,7 +8,7 @@ setup(
     install_requires=[
         "zstandard",
         "numpy",
-        "scikit-learn"
+        "scikit-learn",
         "torch",
         "torchvision",
         "einops",
@@ -19,7 +19,6 @@ setup(
         "sae_lens",
         "transformer_lens",
         "matplotlib",
-        "colorama",
     ],
     url="",
     description="",
