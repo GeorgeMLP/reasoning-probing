@@ -2,8 +2,8 @@ for layer in 17 22 27; do
     python reasoning_features/scripts/find_reasoning_features.py \
         --layer $layer \
         --reasoning-dataset s1k \
-        --reasoning-samples 2000 \
-        --nonreasoning-samples 2000 \
+        --reasoning-samples 1000 \
+        --nonreasoning-samples 1000 \
         --max-length 64 \
         --top-k-features 100 \
         --top-k-tokens 30 \
@@ -19,8 +19,8 @@ for layer in 17 22 27; do
     python reasoning_features/scripts/find_reasoning_features.py \
         --layer $layer \
         --reasoning-dataset general_inquiry_cot \
-        --reasoning-samples 6000 \
-        --nonreasoning-samples 6000 \
+        --reasoning-samples 1000 \
+        --nonreasoning-samples 1000 \
         --max-length 64 \
         --top-k-features 100 \
         --top-k-tokens 30 \

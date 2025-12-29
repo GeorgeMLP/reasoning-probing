@@ -145,15 +145,15 @@ def parse_args():
         "--gamma-values",
         type=float,
         nargs="+",
-        default=[-2.0, -1.0, 0.0, 1.0, 2.0],
-        help="Steering gamma values to test (default: -2 -1 0 1 2)",
+        default=[0.0, 2.0],
+        help="Steering gamma values to test (default: 0 2)",
     )
     
     # Generation parameters
     parser.add_argument(
         "--max-gen-toks",
         type=int,
-        default=32768,
+        default=16384,
         help="Maximum tokens to generate (default: 32768 for full reasoning traces)",
     )
     parser.add_argument(
