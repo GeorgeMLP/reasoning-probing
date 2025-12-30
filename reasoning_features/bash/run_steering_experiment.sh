@@ -5,7 +5,7 @@ for layer in 22; do
         --top-k-features 3 \
         --benchmark aime24 \
         --gamma-values 0.0 2.0 \
-        --max-gen-toks 16384 \
+        --max-gen-toks 32768 \
         --save-dir results/cohens_d/gemma-3-4b-it/s1k/layer$layer/aime24
 done
 for layer in 22; do
@@ -15,7 +15,7 @@ for layer in 22; do
         --top-k-features 3 \
         --benchmark gpqa_diamond \
         --gamma-values 0.0 2.0 \
-        --max-gen-toks 16384 \
+        --max-gen-toks 32768 \
         --save-dir results/cohens_d/gemma-3-4b-it/s1k/layer$layer/gpqa_diamond
 done
 
@@ -26,7 +26,7 @@ for layer in 22; do
         --top-k-features 3 \
         --benchmark aime24 \
         --gamma-values 0.0 2.0 \
-        --max-gen-toks 16384 \
+        --max-gen-toks 32768 \
         --save-dir results/cohens_d/gemma-3-4b-it/general_inquiry_cot/layer$layer/aime24
 done
 for layer in 22; do
@@ -36,6 +36,6 @@ for layer in 22; do
         --top-k-features 3 \
         --benchmark gpqa_diamond \
         --gamma-values 0.0 2.0 \
-        --max-gen-toks 16384 \
+        --max-gen-toks 32768 \
         --save-dir results/cohens_d/gemma-3-4b-it/general_inquiry_cot/layer$layer/gpqa_diamond
 done
