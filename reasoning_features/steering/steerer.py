@@ -117,38 +117,6 @@ class FeatureSteerer:
         
         # Get decoder matrix: shape (n_features, d_model)
         self.W_dec = sae.W_dec.detach()
-        
-        # Load HF model for generation (TransformerLens has bugs with Gemma 3)
-        self.hf_model = None
-        self._load_hf_model_for_generation()
-    
-    def _load_hf_model_for_generation(self):
-        """Load HuggingFace model for generation (TransformerLens has bugs with Gemma 3)."""
-        try:
-            from transformers import AutoModelForCausalLM
-            
-            # Get model name from TransformerLens config
-            model_name = self.model.cfg.model_name
-            
-            # Add google/ prefix if not present
-            if not model_name.startswith("google/") and "gemma" in model_name.lower():
-                model_name = f"google/{model_name}"
-            
-            # Load HF model with same settings
-            self.hf_model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                device_map=self.model.cfg.device,
-                torch_dtype=self.model.cfg.dtype,
-            )
-            
-            # Share parameters with TransformerLens model so hooks affect both
-            # The models should already share the same underlying parameters
-            # since TransformerLens loads from HF
-            
-        except Exception as e:
-            print(f"Warning: Could not load HF model for generation: {e}")
-            print("Falling back to TransformerLens generate (may have issues)")
-            self.hf_model = None
     
     def _create_steering_hook(
         self,
@@ -166,20 +134,23 @@ class FeatureSteerer:
             hook,
         ) -> Float[Tensor, "batch seq d_model"]:
             """Hook that adds steering vector to residual stream."""
+            # Match steering vector dtype to activations
+            steering_vec = steering_vector.to(dtype=activations.dtype, device=activations.device)
+            
             # Apply steering: x' = x + steering_vector
             if config.start_position > 0:
                 result = activations.clone()
                 result[:, config.start_position:] = (
-                    activations[:, config.start_position:] + steering_vector
+                    activations[:, config.start_position:] + steering_vec
                 )
                 return result
             else:
-                return activations + steering_vector
+                return activations + steering_vec
         
         return steering_hook
     
     def _register_hook(self, config: SteeringConfig):
-        """Register the steering hook."""
+        """Register the steering hook on TransformerLens model."""
         hook_fn = self._create_steering_hook(config)
         self.model.add_hook(self.hook_name, hook_fn)
         self._hooks_active = True
@@ -249,29 +220,17 @@ class FeatureSteerer:
                     return_tensors="pt",
                 ).to(device)
             
-            # Generate
+            # Generate using TransformerLens
             with torch.no_grad():
-                # Use HuggingFace model for generation if available (better Gemma 3 support)
-                if self.hf_model is not None:
-                    outputs = self.hf_model.generate(
-                        inputs["input_ids"],
-                        max_new_tokens=max_new_tokens,
-                        temperature=temperature,
-                        top_p=top_p,
-                        do_sample=do_sample,
-                        **generate_kwargs,
-                    )
-                else:
-                    # Fallback to TransformerLens generate
-                    outputs = self.model.generate(
-                        inputs["input_ids"],
-                        max_new_tokens=max_new_tokens,
-                        temperature=temperature,
-                        top_p=top_p,
-                        do_sample=do_sample,
-                        verbose=False,
-                        **generate_kwargs,
-                    )
+                outputs = self.model.generate(
+                    inputs["input_ids"],
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    do_sample=do_sample,
+                    verbose=False,
+                    **generate_kwargs,
+                )
             
             # Decode (excluding prompt)
             prompt_length = inputs["input_ids"].shape[1]
@@ -322,28 +281,17 @@ class FeatureSteerer:
                 return_tensors="pt",
             ).to(device)
         
+        # Generate using TransformerLens
         with torch.no_grad():
-            # Use HuggingFace model for generation if available (better Gemma 3 support)
-            if self.hf_model is not None:
-                outputs = self.hf_model.generate(
-                    inputs["input_ids"],
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    do_sample=do_sample,
-                    **generate_kwargs,
-                )
-            else:
-                # Fallback to TransformerLens generate
-                outputs = self.model.generate(
-                    inputs["input_ids"],
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    do_sample=do_sample,
-                    verbose=False,
-                    **generate_kwargs,
-                )
+            outputs = self.model.generate(
+                inputs["input_ids"],
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                do_sample=do_sample,
+                verbose=False,
+                **generate_kwargs,
+            )
         
         prompt_length = inputs["input_ids"].shape[1]
         generated = outputs[0, prompt_length:]

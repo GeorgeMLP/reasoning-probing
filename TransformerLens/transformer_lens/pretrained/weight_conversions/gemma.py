@@ -10,30 +10,33 @@ def convert_gemma_weights(gemma, cfg: HookedTransformerConfig):
     assert cfg.n_key_value_heads is not None  # keep mypy happy
     assert cfg.d_mlp is not None  # keep mypy happy
 
-    # Check if this is a multimodal model (Gemma3ForConditionalGeneration)
-    # Multimodal models have language_model attribute, text-only models don't
-    is_multimodal = hasattr(gemma, "language_model")
-
-    # Get the actual model
-    # For multimodal: gemma.language_model.model is Gemma3TextModel which has layers/embed_tokens
-    # For text-only: gemma has .model which contains layers/embed_tokens
-    if is_multimodal:
-        # Multimodal structure: gemma.language_model.model contains the text transformer
-        # We skip gemma.vision_tower entirely to save memory
-        if hasattr(gemma.language_model, "model"):
-            base_model = gemma.language_model.model
-        else:
-            # Fallback if structure is different
-            base_model = gemma.language_model
-    else:
-        # Text-only Gemma3ForCausalLM has .model wrapper
+    # Get the base model that contains layers and embed_tokens
+    # For Gemma3ForConditionalGeneration (multimodal): use gemma.language_model directly
+    # For Gemma3ForCausalLM (text-only): gemma.model
+    if hasattr(gemma, "language_model"):
+        # Multimodal: gemma.language_model is Gemma3TextModel
+        base_model = gemma.language_model
+    elif hasattr(gemma, "model"):
+        # Text-only wrapper: gemma.model
         base_model = gemma.model
+    elif hasattr(gemma, "layers"):
+        # Already unwrapped: gemma is the base model
+        base_model = gemma
+    else:
+        raise ValueError(f"Could not find base model in Gemma model structure")
 
-    # Gemma Models scale embeddings by multiplying by sqrt(d_model), use hidden state type to match
-    # HF implementation
-    state_dict["embed.W_E"] = base_model.embed_tokens.weight * torch.tensor(
-        cfg.d_model**0.5, dtype=cfg.dtype
-    )
+    # Gemma 3 uses Gemma3TextScaledWordEmbedding which applies scaling in forward()
+    # So we need to store both the raw weights and handle scaling in TransformerLens embed forward
+    # For now, pre-scale the weights here since TransformerLens Embed doesn't have scaling logic
+    # TODO: Add scaling to TransformerLens Embed.forward() to match HF behavior exactly
+    state_dict["embed.W_E"] = base_model.embed_tokens.weight.clone()
+    
+    # Store the embedding scale factor if it exists (Gemma 3)
+    if hasattr(base_model.embed_tokens, "embed_scale"):
+        # Gemma 3 applies this scaling in forward(), so we need to pre-scale the weights
+        # since TransformerLens Embed doesn't apply scaling
+        embed_scale = base_model.embed_tokens.embed_scale.to(cfg.dtype)
+        state_dict["embed.W_E"] = state_dict["embed.W_E"] * embed_scale
 
     # Gemma has no biases anywhere
     for l in range(cfg.n_layers):
@@ -62,9 +65,14 @@ def convert_gemma_weights(gemma, cfg: HookedTransformerConfig):
         state_dict[f"blocks.{l}.attn._W_V"] = W_V
 
         # Load q_norm and k_norm if they exist (Gemma 3)
+        # Gemma3RMSNorm adds 1 to weights in forward(), so we pre-add it here
         if cfg.use_qk_norm:
-            state_dict[f"blocks.{l}.attn.q_norm.w"] = base_model.layers[l].self_attn.q_norm.weight
-            state_dict[f"blocks.{l}.attn.k_norm.w"] = base_model.layers[l].self_attn.k_norm.weight
+            state_dict[f"blocks.{l}.attn.q_norm.w"] = base_model.layers[l].self_attn.q_norm.weight.float() + torch.ones_like(
+                base_model.layers[l].self_attn.q_norm.weight, dtype=torch.float32
+            )
+            state_dict[f"blocks.{l}.attn.k_norm.w"] = base_model.layers[l].self_attn.k_norm.weight.float() + torch.ones_like(
+                base_model.layers[l].self_attn.k_norm.weight, dtype=torch.float32
+            )
 
         state_dict[f"blocks.{l}.attn.b_Q"] = torch.zeros(
             cfg.n_heads, cfg.d_head, dtype=cfg.dtype, device=W_Q.device

@@ -153,8 +153,8 @@ def parse_args():
     parser.add_argument(
         "--max-gen-toks",
         type=int,
-        default=32768,
-        help="Maximum tokens to generate (default: 32768 for full reasoning traces)",
+        default=16384,
+        help="Maximum tokens to generate (default: 16384 for full reasoning traces)",
     )
     parser.add_argument(
         "--temperature",
