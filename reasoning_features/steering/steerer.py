@@ -220,6 +220,19 @@ class FeatureSteerer:
                     return_tensors="pt",
                 ).to(device)
             
+            # Get EOS token IDs - for Gemma models, use both <eos> and <end_of_turn>
+            # For other models, this will gracefully fall back to the tokenizer's default
+            eos_token_ids = None
+            if hasattr(self.model.tokenizer, 'eos_token_id') and self.model.tokenizer.eos_token_id is not None:
+                # Check if it's a Gemma instruct model that uses <end_of_turn>
+                end_of_turn_id = self.model.tokenizer.convert_tokens_to_ids('<end_of_turn>')
+                if end_of_turn_id != self.model.tokenizer.unk_token_id:
+                    # Gemma instruct model - use both <eos> and <end_of_turn>
+                    eos_token_ids = [self.model.tokenizer.eos_token_id, end_of_turn_id]
+                else:
+                    # Non-Gemma or non-instruct model - use default EOS
+                    eos_token_ids = self.model.tokenizer.eos_token_id
+            
             # Generate using TransformerLens
             with torch.no_grad():
                 outputs = self.model.generate(
@@ -228,6 +241,8 @@ class FeatureSteerer:
                     temperature=temperature,
                     top_p=top_p,
                     do_sample=do_sample,
+                    stop_at_eos=True,
+                    eos_token_id=eos_token_ids,
                     verbose=False,
                     **generate_kwargs,
                 )
@@ -281,6 +296,19 @@ class FeatureSteerer:
                 return_tensors="pt",
             ).to(device)
         
+        # Get EOS token IDs - for Gemma models, use both <eos> and <end_of_turn>
+        # For other models, this will gracefully fall back to the tokenizer's default
+        eos_token_ids = None
+        if hasattr(self.model.tokenizer, 'eos_token_id') and self.model.tokenizer.eos_token_id is not None:
+            # Check if it's a Gemma instruct model that uses <end_of_turn>
+            end_of_turn_id = self.model.tokenizer.convert_tokens_to_ids('<end_of_turn>')
+            if end_of_turn_id != self.model.tokenizer.unk_token_id:
+                # Gemma instruct model - use both <eos> and <end_of_turn>
+                eos_token_ids = [self.model.tokenizer.eos_token_id, end_of_turn_id]
+            else:
+                # Non-Gemma or non-instruct model - use default EOS
+                eos_token_ids = self.model.tokenizer.eos_token_id
+        
         # Generate using TransformerLens
         with torch.no_grad():
             outputs = self.model.generate(
@@ -289,6 +317,8 @@ class FeatureSteerer:
                 temperature=temperature,
                 top_p=top_p,
                 do_sample=do_sample,
+                stop_at_eos=True,
+                eos_token_id=eos_token_ids,
                 verbose=False,
                 **generate_kwargs,
             )
