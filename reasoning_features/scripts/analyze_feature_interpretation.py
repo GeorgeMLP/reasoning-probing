@@ -79,27 +79,43 @@ class LLMClient:
         self.model = model
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
     
-    def chat(self, messages: list[dict], temperature: float = 0.7) -> str:
-        """Send a chat request and return the response."""
-        response = requests.post(
-            url=self.base_url,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps({
-                "model": self.model,
-                "messages": messages,
-                "temperature": temperature,
-            }),
-            timeout=1200,
-        )
+    def chat(self, messages: list[dict], temperature: float = 0.7, max_retries: int = 10) -> str:
+        """Send a chat request and return the response with retry logic."""
+        last_error = None
         
-        result = response.json()
-        if "error" in result:
-            raise Exception(f"API Error: {result['error']}")
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    url=self.base_url,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    data=json.dumps({
+                        "model": self.model,
+                        "messages": messages,
+                        "temperature": temperature,
+                    }),
+                    timeout=3600,
+                )
+                
+                result = response.json()
+                if "error" in result:
+                    raise Exception(f"API Error: {result['error']}")
+                
+                return result["choices"][0]["message"]["content"]
+                
+            except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
+                last_error = e
+                wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4, 8, ... seconds
+                print(f"  API request timeout/connection error (attempt {attempt + 1}/{max_retries}). "
+                      f"Retrying in {wait_time} seconds...")
+                if attempt < max_retries - 1:
+                    time.sleep(wait_time)
+                continue
         
-        return result["choices"][0]["message"]["content"]
+        # All retries failed
+        raise Exception(f"API request failed after {max_retries} attempts: {last_error}")
 
 
 def format_tokens_with_activations(tokens: list) -> str:
