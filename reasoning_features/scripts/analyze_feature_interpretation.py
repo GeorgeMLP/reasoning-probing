@@ -96,7 +96,7 @@ class LLMClient:
                         "messages": messages,
                         "temperature": temperature,
                     }),
-                    timeout=3600,
+                    timeout=600,
                 )
                 
                 result = response.json()

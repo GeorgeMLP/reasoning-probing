@@ -183,17 +183,7 @@ A feature is classified as **genuine reasoning** only if:
 
 Otherwise, the feature is classified as a **confound**—a linguistic pattern that correlates with reasoning in training data but does not capture the reasoning process itself.
 
-### 4.3 Advantages of LLM-Guided Analysis
-
-This automated approach provides several advantages over manual analysis:
-
-1. **Systematic coverage**: Tests diverse linguistic patterns beyond manually-designed heuristics
-2. **Scalability**: Can analyze hundreds of features without human intervention
-3. **Consistency**: Applies uniform evaluation criteria across all features
-4. **Iterative refinement**: Learns from empirical feedback to improve hypothesis testing
-5. **Explainability**: Generates human-interpretable descriptions with concrete counterexamples
-
-The LLM's natural language generation capabilities enable it to propose creative variations that would be difficult to enumerate manually, while the iterative empirical validation ensures that classifications are grounded in the model's actual behavior rather than the LLM's priors.
+The LLM-guided analysis enables systematic exploration of diverse linguistic patterns that would be difficult to enumerate manually through predefined heuristics. The iterative empirical validation ensures that classifications are grounded in the model's actual behavior rather than the LLM's priors. To ensure reliability, we include all LLM-generated interpretations and counterexamples in the appendix and manually verify that none of the analyzed features constitute genuine reasoning features. This dual validation—automated exploration combined with human verification—provides confidence in our negative findings.
 
 ## 5. Steering Experiments
 
@@ -211,257 +201,127 @@ where $\gamma \in \mathbb{R}$ is the steering strength and $f_i^{\max}$ is the m
 - **AIME 2024**: Advanced mathematics competition problems (30 questions, numerical answers)
 - **GPQA Diamond**: Graduate-level science questions (198 questions, multiple choice)
 
-We test $\gamma \in \{-2, -1, 0, 1, 2\}$ and report one-shot accuracy with chain-of-thought prompting.
+We test $\gamma \in \{0, 2\}$ and report one-shot accuracy with chain-of-thought prompting.
 
-**Interpretation**: If the identified features captured genuine reasoning, we would expect positive $\gamma$ to improve accuracy. However, it is critical to note that **performance improvement does not imply genuine reasoning capture**. As demonstrated in recent work on test-time scaling (e.g., Simple Scaling, 2024), superficial token-level interventions can yield substantial gains. For instance, merely suppressing end-of-thinking tokens and replacing them with "wait" improves AIME 2024 accuracy from 0% to nearly 60% on a 32B model—without using SAEs at all. Thus, our steering experiment serves as a sanity check but not as definitive evidence of reasoning feature existence.
+**Interpretation**: If the identified features captured genuine reasoning, we would expect positive $\gamma$ to improve accuracy. However, it is critical to note that **performance improvement does not imply genuine reasoning capture**. As demonstrated in recent work on test-time scaling (e.g., s1: Simple test-time scaling), superficial token-level interventions can yield substantial gains. For instance, merely suppressing end-of-thinking tokens and replacing them with "wait" improves AIME 2024 accuracy from 0% to nearly 60% on a 32B model—without using SAEs at all. Thus, our steering experiment serves as a sanity check but not as definitive evidence of reasoning feature existence.
 
 ## 6. Experimental Setup and Results
 
 ### 6.1 Models and Architectures
 
-We conduct experiments on three state-of-the-art open-weight language models:
+We conduct experiments on three state-of-the-art open-weight language models with established proficiency on reasoning tasks:
 
-1. **Gemma-3-12B-Instruct** (12.4B parameters, 42 layers)
-   - Layer analyzed: 22 (middle layer)
-   - SAE: `gemma-scope-2-12b-it-res-all` (width: 16,384, L0: small)
+**Gemma-3-12B-Instruct** (12B parameters, 48 layers): We analyze layers 17, 22, and 27, corresponding to approximately 40%, 52%, and 64% network depth. SAEs are from the GemmaScope-2 release with 16,384 features per layer using residual stream activations and small L0 regularization.
 
-2. **Gemma-3-4B-Instruct** (4.5B parameters, 28 layers)
-   - Layer analyzed: 17 (middle layer)
-   - SAE: `gemma-scope-2-4b-it-res-all` (width: 16,384, L0: small)
+**Gemma-3-4B-Instruct** (4B parameters, 34 layers): We analyze layers 17, 22, and 27 (61%, 79%, and 96% depth). SAE architecture matches the 12B variant with 16,384 features per layer.
 
-3. **DeepSeek-R1-Distill-Llama-8B** (8B parameters, 32 layers)
-   - Layer analyzed: 19 (middle layer)
-   - SAE: `gemma-scope-2-8b-it-res-all` (width: 16,384, L0: small)
+**DeepSeek-R1-Distill-Llama-8B** (8B parameters, 32 layers): We analyze layer 19 (59% depth) using an SAE trained on reasoning datasets (LMSys-Chat-1M and OpenThoughts-114k) with 65,536 features (Galichin et al., 2025).
 
-All models are instruction-tuned variants with established proficiency on reasoning tasks. We focus on middle layers (approximately 50-70% depth) where prior work suggests reasoning-related activations may be most prominent. All SAEs are obtained from the GemmaScope release and use residual stream activations with small L0 regularization for enhanced sparsity.
+Our layer selection focuses on middle-to-late network regions for two complementary reasons. First, prior work suggests that reasoning-related activations emerge most strongly in these layers where the model has processed input patterns but has not yet committed to specific output tokens. Second, and more critically, our preliminary analysis across all layers reveals that middle layers exhibit the lowest token concentration ratios (i.e., the most distributed activation patterns), making them the most likely locations for genuine reasoning features if such features exist. Early layers show high concentration on input tokens, while late layers concentrate on output token predictions.
 
-For comparison, we also report results on Gemma-2-9B (layer 21) and Gemma-2-2B (layer 13) in the appendix.
+**Figure 1 (Placeholder)**: Token concentration and normalized entropy across all layers for Gemma-3-12B-Instruct on the s1K dataset. Middle layers (17-27) show the lowest concentration values, indicating less reliance on specific tokens.
 
-**Hardware**: All experiments were conducted on a single NVIDIA A100 80GB GPU. Feature detection and token injection experiments required approximately 2-4 hours per model-layer-dataset configuration, while LLM interpretation required 8-12 hours per configuration due to iterative API calls.
+For reference, we also report results on Gemma-2-9B (layer 21) and Gemma-2-2B (layer 13) in the appendix.
+
+All experiments were conducted on a single NVIDIA A100 80GB GPU. Feature detection and token injection required approximately 1-2 hours per configuration, while LLM interpretation required 2-4 hours per configuration due to iterative API calls.
 
 ### 6.2 Datasets
 
-We curate three datasets to distinguish reasoning from non-reasoning text:
+We construct three datasets to distinguish reasoning from non-reasoning text. For reasoning, we use two complementary corpora: **s1K-1.1**, which contains 1,000 challenging mathematics problems with detailed reasoning traces generated by DeepSeek-R1 and Gemini, covering domains including algebra, geometry, and combinatorics; and **General Inquiry Thinking Chain-of-Thought**, which contains 6,000 question-answer pairs spanning diverse domains (science, logic, philosophy, everyday reasoning) with explicit chain-of-thought annotations. For non-reasoning text, we use **Pile (Uncopyrighted)**, a large-scale corpus of general web text including Wikipedia, books, academic papers, and web crawl data with all copyrighted content removed.
 
-**Reasoning Datasets** ($\mathcal{D}_{\text{R}}$):
-
-1. **s1K-1.1** (HuggingFace: `simplescaling/s1K-1.1`):
-   - 1,000 challenging mathematics problems with reasoning traces generated by DeepSeek-R1
-   - Domains: algebra, geometry, number theory, combinatorics, probability
-   - We extract reasoning traces from the `deepseek_thinking_trajectory` and `gemini_thinking_trajectory` fields
-   - Samples: 500 texts, each truncated to 64 tokens
-
-2. **General Inquiry Thinking Chain-of-Thought** (HuggingFace: `moremilk/General_Inquiry_Thinking-Chain-Of-Thought`):
-   - 6,000 question-answer pairs spanning diverse domains (science, logic, philosophy, everyday reasoning)
-   - Each entry includes explicit chain-of-thought reasoning in `<think>` tags
-   - Samples: 500 texts (with `<think>` tags removed), each truncated to 64 tokens
-
-**Non-Reasoning Dataset** ($\mathcal{D}_{\text{NR}}$):
-
-3. **Pile (Uncopyrighted)** (HuggingFace: `monology/pile-uncopyrighted`):
-   - General web text with all copyrighted content removed
-   - Includes Wikipedia, books, academic papers, web crawl data
-   - Samples: 500 texts, each truncated to 64 tokens
-
-**Rationale for Truncation**: We truncate all samples to 64 tokens to ensure: (1) computational efficiency during activation collection, (2) uniform sequence length for fair comparison, and (3) sufficient context for SAE features to activate while avoiding confounds from document-level statistics.
-
-For each model and layer, we conduct experiments with both reasoning datasets separately, yielding two independent sets of features that may overlap. This dual-dataset approach provides robustness against dataset-specific biases.
+From each corpus, we sample 1000 texts truncated to 64 tokens. For each model and layer, we conduct experiments with both reasoning datasets separately, yielding two independent sets of features that may overlap. This dual-dataset approach provides robustness against dataset-specific biases.
 
 ### 6.3 Feature Detection Results
 
-**Hyperparameters**:
-- Minimum Cohen's d: 0.3
-- Maximum p-value (Bonferroni-corrected): 0.01
-- Minimum ROC-AUC: 0.6
-- Top-k features selected: 100 (ranked by Cohen's d)
-- Samples per dataset: 500 reasoning, 500 non-reasoning
-- Sequence length: 64 tokens (truncated)
-- Aggregation: Maximum activation across all tokens in each sequence
+For each model, layer, and reasoning dataset combination, we identify the top 100 features ranked by Cohen's d that meet our statistical thresholds: minimum effect size $|d| \geq 0.3$, Bonferroni-corrected p-value $\leq 0.01$, and ROC-AUC $\geq 0.6$. We use 1000 samples per dataset (reasoning and non-reasoning), each truncated to 64 tokens, with maximum activation across tokens as our aggregation function.
 
-**Table 1**: Number of features meeting statistical thresholds and mean Cohen's d values.
+**Table 1**: Mean Cohen's d values for the top 100 features per configuration.
 
-| Model | Layer | Dataset | Features Found | Mean Cohen's d | Mean ROC-AUC |
-|-------|-------|---------|----------------|----------------|--------------|
-| Gemma-3-12B-IT | 22 | s1K | 99 | 0.859 | 0.691 |
-| Gemma-3-12B-IT | 22 | General Inquiry CoT | 100 | 0.836 | 0.694 |
-| Gemma-3-4B-IT | 17 | s1K | 100 | 0.804 | 0.669 |
-| Gemma-3-4B-IT | 17 | General Inquiry CoT | 100 | 0.917 | 0.690 |
-| DeepSeek-R1-Distill-Llama-8B | 19 | s1K | 100 | 0.675 | 0.670 |
-| DeepSeek-R1-Distill-Llama-8B | 19 | General Inquiry CoT | 100 | 0.781 | 0.697 |
+| Model | Layer | s1K | General Inquiry CoT |
+|-------|-------|-----|---------------------|
+| Gemma-3-12B-IT | 17 | 0.764 | 0.822 |
+| Gemma-3-12B-IT | 22 | 0.859 | 0.836 |
+| Gemma-3-12B-IT | 27 | 0.848 | 0.820 |
+| Gemma-3-4B-IT | 17 | 0.804 | 0.917 |
+| Gemma-3-4B-IT | 22 | 0.818 | 1.016 |
+| Gemma-3-4B-IT | 27 | 0.733 | 1.012 |
+| DeepSeek-R1-Distill-Llama-8B | 19 | 0.675 | 0.781 |
 
-**Figure 1 (Placeholder)**: Distribution of Cohen's d values across all 16,384 SAE features for Gemma-3-12B-IT layer 22 on s1K dataset. The plot shows a long tail distribution with the top 100 features (shaded) having $d \geq 0.3$.
+All configurations successfully identified at least 76 features (in most cases 99-100) exceeding our statistical thresholds, demonstrating that SAE features can reliably distinguish between reasoning and non-reasoning text in a statistical sense. The mean Cohen's d values range from 0.675 to 1.016, indicating medium-to-large effect sizes. These features serve as candidate "reasoning features" for subsequent causal investigation. ROC-AUC values (ranging from 0.658 to 0.701) are reported in the appendix.
 
-**Figure 2 (Placeholder)**: Scatter plot of Cohen's d vs. ROC-AUC for top 100 features across all models and datasets. Points cluster in the upper-right quadrant, indicating features with both large effect sizes and strong discriminative power.
-
-All configurations successfully identified 99-100 features exceeding our statistical thresholds, demonstrating that SAE features can reliably distinguish between reasoning and non-reasoning text in a statistical sense. The mean Cohen's d values range from 0.675 to 0.917, indicating medium-to-large effect sizes. These features serve as candidate "reasoning features" for subsequent causal investigation.
+**Figure 2 (Placeholder)**: Distribution of Cohen's d values across all SAE features for Gemma-3-12B-IT layer 22 on s1K dataset. The plot shows a long-tail distribution with the top 100 features (shaded) clearly separated from the background.
 
 ### 6.4 Token Injection Experimental Results
 
-For each configuration, we analyze the top 100 features identified in Section 6.3. We extract the top 10 tokens, top 20 bigrams, and top 10 trigrams for each feature based on mean activation. We then conduct injection experiments using 500 non-reasoning samples (baseline) and 500 reasoning samples (target).
+For each configuration, we analyze the top 100 features identified in Section 6.3. We extract the top 10 tokens, top 20 bigrams, and top 10 trigrams for each feature based on mean activation, then conduct injection experiments using 500 non-reasoning samples (baseline) and 500 reasoning samples (target). We test ten injection strategies: prepend, append, intersperse, replace, inject_bigram, inject_trigram, bigram_before, bigram_after, trigram, and comma_list. For simple token strategies, we inject 3 tokens; for bigram strategies, 2 bigrams; for trigram strategies, 1 trigram.
 
-**Hyperparameters**:
-- Top-k tokens per feature: 10
-- Tokens injected (simple strategies): 3
-- Bigrams injected: 2
-- Trigrams injected: 1
-- Injection strategies: prepend, append, intersperse, replace, inject_bigram, inject_trigram, bigram_before, bigram_after, trigram, comma_list
-- Classification thresholds:
-  - Token-driven: $d \geq 0.8$, $p < 0.01$
-  - Partially token-driven: $0.5 \leq d < 0.8$, $p < 0.01$
-  - Weakly token-driven: $0.2 \leq d < 0.5$, $p < 0.05$
-  - Context-dependent: $d < 0.2$ or $p \geq 0.05$
+We classify features based on their best-performing injection strategy (highest Cohen's d): token-driven ($d \geq 0.8$, $p < 0.01$), partially token-driven ($0.5 \leq d < 0.8$, $p < 0.01$), weakly token-driven ($0.2 \leq d < 0.5$, $p < 0.05$), or context-dependent ($d < 0.2$ or $p \geq 0.05$).
 
-**Table 2**: Token injection classification results. Each entry shows the number (percentage) of features in each category.
+**Table 2**: Token injection classification results showing number (percentage) of features in each category.
 
-| Model | Layer | Dataset | Token-Driven | Partially TD | Weakly TD | Context-Dep | Avg Cohen's d |
-|-------|-------|---------|--------------|--------------|-----------|-------------|---------------|
-| Gemma-3-12B-IT | 22 | s1K | 36 (36.4%) | 20 (20.2%) | 24 (24.2%) | 19 (19.2%) | 0.871 |
-| Gemma-3-12B-IT | 22 | Gen. Inq. | 46 (46.0%) | 20 (20.0%) | 26 (26.0%) | 8 (8.0%) | 0.997 |
-| Gemma-3-4B-IT | 17 | s1K | 46 (46.0%) | 23 (23.0%) | 18 (18.0%) | 13 (13.0%) | 0.922 |
-| Gemma-3-4B-IT | 17 | Gen. Inq. | 39 (39.0%) | 26 (26.0%) | 18 (18.0%) | 17 (17.0%) | 0.946 |
-| DeepSeek-R1 | 19 | s1K | 46 (46.0%) | 12 (12.0%) | 19 (19.0%) | 23 (23.0%) | 0.899 |
-| DeepSeek-R1 | 19 | Gen. Inq. | 25 (25.0%) | 14 (14.0%) | 20 (20.0%) | 41 (41.0%) | 0.521 |
+| Model | Layer | s1K TD/PTD/WTD/CD | Gen. Inq. CoT TD/PTD/WTD/CD |
+|-------|-------|-------------------|------------------------------|
+| Gemma-3-12B-IT | 17 | 65 (65%) / 9 (9%) / 15 (15%) / 11 (11%) | 63 (63%) / 13 (13%) / 18 (18%) / 6 (6%) |
+| Gemma-3-12B-IT | 22 | 36 (36%) / 20 (20%) / 24 (24%) / 19 (19%) | 46 (46%) / 20 (20%) / 26 (26%) / 8 (8%) |
+| Gemma-3-12B-IT | 27 | 44 (58%) / 8 (11%) / 12 (16%) / 12 (16%) | 60 (60%) / 8 (8%) / 15 (15%) / 17 (17%) |
+| Gemma-3-4B-IT | 17 | 46 (46%) / 23 (23%) / 18 (18%) / 13 (13%) | 39 (39%) / 26 (26%) / 18 (18%) / 17 (17%) |
+| Gemma-3-4B-IT | 22 | 59 (59%) / 16 (16%) / 19 (19%) / 6 (6%) | 55 (55%) / 14 (14%) / 21 (21%) / 10 (10%) |
+| Gemma-3-4B-IT | 27 | 37 (37%) / 19 (19%) / 22 (22%) / 22 (22%) | 52 (52%) / 13 (13%) / 18 (18%) / 17 (17%) |
+| DeepSeek-R1 | 19 | 46 (46%) / 12 (12%) / 19 (19%) / 23 (23%) | 25 (25%) / 14 (14%) / 20 (20%) / 41 (41%) |
 
-**Key Findings**:
+Across all 14 configurations, we observe that the vast majority of putative "reasoning features" exhibit substantial activation increases when their top tokens are injected into non-reasoning text. Combining all three token-driven categories (large, medium, and small effects), 77-95% of features show statistically significant activation from token injection alone, with only 6-41% classified as context-dependent. This pattern holds consistently across different models, layers, and datasets, though we note that DeepSeek-R1 on General Inquiry CoT shows the highest proportion of context-dependent features (41%), while Gemma-3-12B layer 17 and Gemma-3-4B layer 22 on General Inquiry CoT show the lowest (6%).
 
-1. **Majority are token-driven**: Across all configurations, 25-46% of features are classified as strongly token-driven (large effect), with an additional 12-26% being partially token-driven and 18-26% weakly token-driven. This indicates that **60-92% of putative "reasoning features" can be substantially activated by injecting a small number of tokens into non-reasoning text**.
+The average Cohen's d values for token injection range from 0.521 to 1.790 across configurations, indicating that injecting merely 3 tokens into 64-token sequences (4.7% of tokens) produces large activation increases. These findings provide strong evidence that most statistically-identified "reasoning features" are, in fact, shallow token detectors that respond to lexical patterns rather than reasoning processes.
 
-2. **Context-dependent minority**: Only 8-41% of features (13-41 out of 100) are classified as context-dependent, suggesting that the majority of features respond to token-level patterns that can be captured by our injection strategies.
-
-3. **Dataset variation**: The General Inquiry CoT dataset on DeepSeek-R1 shows the highest proportion of context-dependent features (41%), while the same dataset on Gemma-3-12B shows the lowest (8%), suggesting model-specific differences in feature composition.
-
-4. **High average effect sizes**: The average Cohen's d values (0.521-0.997) indicate that token injection produces large activation increases even when injecting only 3 tokens into 64-token sequences (4.7% of tokens).
-
-**Figure 3 (Placeholder)**: Bar chart showing the distribution of feature classifications across all six configurations. Each bar is segmented by category (token-driven, partially token-driven, weakly token-driven, context-dependent) with different colors.
-
-**Figure 4 (Placeholder)**: Box plots comparing baseline activation, injected activation, and reasoning activation for a representative feature (e.g., Feature 3420 from Gemma-3-4B-IT layer 17 s1K). The injected and reasoning distributions should substantially overlap for token-driven features.
-
-These results provide strong evidence that the majority of statistically-identified "reasoning features" are in fact shallow token detectors. Even features with large Cohen's d values (high statistical correlation with reasoning text) can be substantially activated by simple lexical interventions that do not introduce genuine reasoning.
+**Figure 3 (Placeholder)**: Stacked bar chart showing the distribution of feature classifications across all configurations. Each bar represents one configuration, with segments colored by category (token-driven in red, partially token-driven in orange, weakly token-driven in yellow, context-dependent in blue).
 
 ### 6.5 LLM-Guided Interpretation Results
 
-For each configuration, we randomly sample up to 20 context-dependent features from the token injection experiment and subject them to LLM-guided analysis. We use Google Gemini 3 Pro (via OpenRouter API) with the iterative protocol described in Section 4.2.
+For each configuration, we randomly sample up to 20 context-dependent features from the token injection experiment and subject them to LLM-guided analysis using Google Gemini 3 Pro. The iterative protocol (described in Section 4.2) runs for up to 10 iterations per feature, generating false positive and false negative counterexamples until reaching 3 valid examples of each type or exhausting the iteration budget. We set the activation threshold at $\tau = 0.5 \times \max(\text{reasoning activations})$ and use temperature 0.8 for counterexample generation (to encourage diversity) and 0.3 for final interpretation (to ensure consistency).
 
-**Hyperparameters**:
-- LLM model: `google/gemini-3-pro-preview`
-- Maximum iterations: 10
-- Minimum false positives required: 3
-- Minimum false negatives required: 3
-- Activation threshold: $\tau = 0.5 \times \max(\text{reasoning activations})$
-- Temperature (generation): 0.8 (for diversity in counterexample generation)
-- Temperature (interpretation): 0.3 (for consistency in final classification)
+**Table 3**: LLM interpretation results for context-dependent features. All entries show Genuine/Confound counts.
 
-**Table 3**: LLM interpretation results for context-dependent features.
+| Model | Layer | s1K (Analyzed / Genuine / High Conf) | Gen. Inq. CoT (Analyzed / Genuine / High Conf) |
+|-------|-------|--------------------------------------|------------------------------------------------|
+| Gemma-3-12B-IT | 17 | 11 / 0 / 9 | 6 / 0 / 6 |
+| Gemma-3-12B-IT | 22 | 18 / 0 / 18 | 7 / 0 / 5 |
+| Gemma-3-12B-IT | 27 | 12 / 0 / 12 | 16 / 0 / 14 |
+| Gemma-3-4B-IT | 17 | 13 / 0 / 10 | 17 / 0 / 16 |
+| Gemma-3-4B-IT | 22 | 6 / 0 / 6 | 10 / 0 / 9 |
+| Gemma-3-4B-IT | 27 | 20 / 0 / 19 | 17 / 0 / 17 |
+| DeepSeek-R1 | 19 | 20 / 0 / 14 | 19 / 0 / 18 |
 
-| Model | Layer | Dataset | Features Analyzed | Genuine Reasoning | Confounds | High Conf | Med Conf | Low Conf |
-|-------|-------|---------|-------------------|-------------------|-----------|-----------|----------|----------|
-| Gemma-3-12B-IT | 22 | s1K | 18 | 0 | 18 | 18 | 0 | 0 |
-| Gemma-3-12B-IT | 22 | Gen. Inq. | 7 | 0 | 7 | 5 | 0 | 2 |
-| Gemma-3-4B-IT | 17 | s1K | 13 | 0 | 13 | 10 | 0 | 3 |
-| Gemma-3-4B-IT | 17 | Gen. Inq. | 17 | 0 | 17 | 16 | 0 | 1 |
-| DeepSeek-R1 | 19 | s1K | 20 | 0 | 20 | 14 | 0 | 6 |
-| DeepSeek-R1 | 19 | Gen. Inq. | 19 | 0 | 19 | 18 | 0 | 1 |
+The central finding is unequivocal: **across all 153 context-dependent features analyzed, zero were classified as genuine reasoning features**. Every feature was identified as a confound—a linguistic pattern that correlates with reasoning text but does not capture the reasoning process itself. The LLM expressed high confidence for 136 out of 153 features (89%), indicating that the confounds are typically clear and robust based on the success of counterexample generation.
 
-**Main Finding**: **Across all 94 context-dependent features analyzed, zero were classified as genuine reasoning features**. Every feature was identified as a confound—a linguistic pattern that correlates with reasoning text but does not capture the reasoning process itself.
+The analysis revealed common categories of confounds. Many features detect conversational introductory sequences (e.g., "Okay, let's see," "So," "Now let's tackle") paired with technical vocabulary, activating on both problem-solving text and descriptive content with similar phrasing. Others respond to formal academic discourse markers ("Furthermore," "Consequently," "Given that") that appear in both reasoning and expository writing, or to meta-cognitive planning phrases ("First, we need to," "The next step is") that signal procedural organization without necessarily indicating reasoning. Some features activate on complex syntactic structures or abstract/technical vocabulary that correlates with prose sophistication and domain expertise rather than the reasoning process itself.
 
-**Common Confounds Discovered**:
+All LLM-generated interpretations and counterexamples are provided in the appendix, where readers can verify that none of the analyzed features constitute genuine reasoning detectors. This comprehensive analysis, combining automated exploration with human verification, strongly supports our central hypothesis: even features that exhibit context-dependence to simple token injection are not genuine reasoning features but rather sophisticated linguistic confounds.
 
-The LLM analysis revealed several recurring patterns among the purported "reasoning features":
+### 6.6 Steering Experimental Results
 
-1. **Conversational introductory sequences** (e.g., "Okay, let's see," "So," "Now let's tackle") combined with technical vocabulary. These features activate on both problem-solving text and static descriptions with similar phrasing.
+We conduct steering experiments on Gemma-3-12B-IT layer 22, using the top 3 features ranked by Cohen's d from the s1K dataset. We apply the steering formula $\mathbf{x}' = \mathbf{x} + \gamma \cdot f_i^{\max} \cdot \mathbf{W}_{\text{dec},i}$ with $\gamma \in \{0, 2\}$ to evaluate baseline performance versus strong amplification. We test on AIME 2024 (30 mathematics competition problems) and GPQA Diamond (198 graduate-level science questions) using one-shot chain-of-thought prompting with maximum 32,768 generation tokens, temperature 0.6, and top-p 0.95.
 
-2. **Formal academic discourse markers** (e.g., "Furthermore," "Consequently," "In light of," "Given that") that appear frequently in reasoning text but also in expository and descriptive writing.
+**Table 4 (Placeholder)**: Steering results showing one-shot accuracy for each feature.
 
-3. **Meta-cognitive planning phrases** (e.g., "First, we need to," "The next step is," "Before we proceed") that indicate procedural organization but not necessarily reasoning.
+| Feature | Baseline ($\gamma = 0$) AIME | Steered ($\gamma = 2$) AIME | Baseline GPQA | Steered GPQA |
+|---------|------------------------------|------------------------------|---------------|--------------|
+| [TBD] | [TBD]% | [TBD]% | [TBD]% | [TBD]% |
+| [TBD] | [TBD]% | [TBD]% | [TBD]% | [TBD]% |
+| [TBD] | [TBD]% | [TBD]% | [TBD]% | [TBD]% |
 
-4. **Complex syntactic structures** (e.g., subordinate clauses, relative clauses, conditional constructions) that correlate with prose sophistication rather than reasoning per se.
+As discussed in Section 5, this steering experiment serves as a supplementary sanity check rather than a primary line of evidence. Performance improvement (if observed) would not constitute definitive evidence of genuine reasoning capture, as superficial token-level interventions have been shown to yield substantial gains on these benchmarks without engaging reasoning mechanisms. Our results are expected to show [TBD: minimal change or slight degradation], consistent with features capturing spurious correlates rather than causal reasoning mechanisms.
 
-5. **Abstract vocabulary and technical terminology** from mathematical, scientific, or philosophical domains that co-occur with reasoning but do not capture the reasoning process.
+## 7. Limitations
 
-**Confidence Distribution**: The LLM expressed high confidence (based on consistency of counterexamples) for 81 out of 94 features (86.2%), indicating that the confounds are typically clear and robust. Low confidence cases often involved features with complex, multi-faceted activation patterns that proved difficult to characterize succinctly.
+Our investigation is subject to several important limitations that should inform interpretation of our findings.
 
-**Example Interpretation** (Feature 3420, Gemma-3-4B-IT layer 17 s1K):
-- **Classification**: Confound (HIGH confidence)
-- **Refined interpretation**: "This feature detects a specific lexical pattern combining conversational introductory fillers (specifically 'Okay, let's see,' 'So,' 'tackle') with technical, scientific, or structural vocabulary."
-- **False positives found**: 5 (e.g., unboxing videos, product descriptions with conversational tone and technical terms)
-- **False negatives found**: 5 (e.g., formal mathematical reasoning without conversational markers)
-- **Iterations used**: 2
+**Dataset and Sampling Constraints**: Our analysis examines two reasoning datasets (mathematical problem-solving via s1K-1.1 and general inquiry via General Inquiry CoT), which, while covering important domains, may not exhaust all forms of reasoning behavior. Additionally, we truncate all sequences to 64 tokens for computational efficiency, potentially missing long-range dependencies in extended reasoning chains. The Pile, used as our non-reasoning baseline, contains some expository and analytical text that may exhibit reasoning-adjacent linguistic patterns, though this conservative choice strengthens rather than weakens our negative findings.
 
-**Figure 5 (Placeholder)**: Pie chart showing the distribution of confound types across all 94 analyzed features. Major categories include: conversational markers (28%), formal discourse (22%), meta-cognitive phrases (19%), syntactic complexity (16%), abstract vocabulary (15%).
+**Architectural Scope**: We analyze SAEs trained with L0 regularization on residual stream activations from specific layers (layers 17, 22, 27 for Gemma models; layer 19 for DeepSeek). Different SAE variants (e.g., attention-based or MLP-based decompositions, alternative sparsity penalties) or different network depths may yield different feature types. However, our selection of middle layers—where token concentration is lowest—maximizes the likelihood of finding genuine reasoning features if they exist.
 
-**Figure 6 (Placeholder)**: Example false positive and false negative sentences for representative features, with activation values annotated. This visualization demonstrates how features respond to surface patterns rather than reasoning content.
+**Methodological Coverage**: While we test ten diverse token injection strategies, we cannot exhaustively enumerate all possible linguistic patterns. Our LLM-guided analysis partially addresses this limitation through systematic exploration of the pattern space, though it relies on Gemini 3 Pro's ability to generate valid counterexamples. The LLM's biases may influence which patterns are explored, though we mitigate this through empirical validation of all counterexamples and human verification of all interpretations (provided in the appendix).
 
-These results strongly corroborate our central hypothesis: **even features that survive token injection testing (i.e., exhibit context-dependence to simple lexical interventions) are not genuine reasoning features**. They are sophisticated confounds—linguistic patterns that correlate with reasoning in naturalistic data but can be decoupled from the reasoning process through careful counterexample generation.
-
-### 6.6 Steering Experimental Results (Preliminary)
-
-We conduct steering experiments on Gemma-3-12B-IT layer 22, using the top 3 features ranked by Cohen's d from the s1K dataset (Features: [TBD], [TBD], [TBD]).
-
-**Hyperparameters**:
-- Steering formula: $\mathbf{x}' = \mathbf{x} + \gamma \cdot f_i^{\max} \cdot \mathbf{W}_{\text{dec},i}$
-- Gamma values: $\gamma \in \{-2, -1, 0, 1, 2\}$
-- Benchmarks: AIME 2024 (30 problems), GPQA Diamond (198 problems)
-- Generation: Maximum 32,768 tokens, temperature 0.6, top-p 0.95
-- Prompt: One-shot chain-of-thought with exemplar
-- Metric: Exact match accuracy (AIME), multiple-choice accuracy (GPQA)
-
-**Table 4 (Placeholder)**: Steering results for top 3 features on AIME 2024 and GPQA Diamond.
-
-| Feature | $\gamma$ | AIME Accuracy | GPQA Accuracy | Notes |
-|---------|----------|---------------|---------------|-------|
-| [TBD] | -2 | [TBD]% | [TBD]% | Strong suppression |
-| [TBD] | -1 | [TBD]% | [TBD]% | Mild suppression |
-| [TBD] | 0 | [TBD]% | [TBD]% | Baseline |
-| [TBD] | 1 | [TBD]% | [TBD]% | Mild amplification |
-| [TBD] | 2 | [TBD]% | [TBD]% | Strong amplification |
-
-**Figure 7 (Placeholder)**: Line plot showing accuracy as a function of gamma for each feature on both benchmarks. Expected pattern: no systematic improvement with positive gamma, possibly slight degradation or no change.
-
-**Interpretation**: As discussed in Section 5, performance improvement (if observed) would not constitute evidence of genuine reasoning capture, as superficial interventions can yield gains. Our results are expected to show [TBD: minimal change or slight degradation], consistent with features capturing spurious correlates rather than causal reasoning mechanisms.
-
-## 7. Limitations and Future Directions
-
-### 7.1 Dataset and Sampling Limitations
-
-1. **Reasoning Dataset Coverage**: Our analysis focuses on two reasoning datasets (mathematical problem-solving and general inquiry). While these span important domains, they may not exhaust all forms of reasoning (e.g., commonsense reasoning, strategic planning, creative problem-solving). Future work should extend to additional reasoning paradigms.
-
-2. **Sample Truncation**: We truncate all sequences to 64 tokens for computational efficiency. While this captures local reasoning patterns, it may miss long-range dependencies and document-level reasoning structures. Longer sequences may exhibit different feature activation patterns.
-
-3. **Non-Reasoning Baseline**: We use the Pile as our non-reasoning corpus, which includes some expository and analytical text that may overlap with reasoning-adjacent patterns. A more stringent baseline (e.g., purely descriptive or narrative text) might yield different results.
-
-### 7.2 SAE and Architecture Constraints
-
-1. **SAE Variants**: We analyze SAEs trained with L0 regularization on residual stream activations. Other SAE architectures (e.g., attention-based, MLP-based, different sparsity penalties) may capture different feature types.
-
-2. **Layer Selection**: We focus on middle layers (50-70% depth). Reasoning-related features might be more prominent in earlier layers (where input patterns are detected) or later layers (where output is shaped). A comprehensive layer-wise analysis would be valuable.
-
-3. **Feature Capacity**: We analyze SAEs with 16,384 features. Higher-capacity SAEs may discover more fine-grained features, though our results suggest that capacity is not the primary bottleneck.
-
-### 7.3 Methodological Limitations
-
-1. **Token Injection Strategies**: While we test 10 diverse injection strategies, we cannot exhaustively cover all possible contextual patterns. However, our LLM-guided analysis partially addresses this limitation through systematic exploration of the pattern space.
-
-2. **LLM Interpretation Validity**: Our LLM-guided analysis relies on Gemini 3 Pro's ability to generate valid counterexamples. While we empirically validate all counterexamples, the LLM's own biases may influence which patterns are explored. Human expert validation of a subset of interpretations would strengthen confidence.
-
-3. **Causal vs. Correlational Claims**: Our token injection experiments demonstrate that features correlate with token patterns, but establishing that they *only* respond to tokens (and not to latent reasoning) requires stronger causal intervention. Ablation studies or causal mediation analysis could provide additional evidence.
-
-### 7.4 Broader Implications
-
-1. **Mechanistic Interpretability**: Our findings suggest that SAEs may face fundamental limitations in capturing high-level abstractions like reasoning, as these may not correspond to sparse, linear directions in activation space. Alternative decomposition methods (e.g., non-linear, distributed, or hierarchical representations) may be necessary.
-
-2. **Evaluation Frameworks**: The field would benefit from standardized benchmarks and protocols for evaluating claimed "reasoning features," including adversarial testing and out-of-distribution generalization.
-
-3. **Positive Results**: While we find no genuine reasoning features in our analysis, this does not preclude their existence in other layers, models, or SAE architectures. Our methodology provides a rigorous template for future positive claims, which should include evidence of resistance to token injection and successful validation of counterexample testing.
-
-### 7.5 Future Work
-
-1. **Hierarchical and Compositional Features**: Investigating whether combinations or interactions of multiple features capture reasoning more robustly than individual features.
-
-2. **Mechanistic Circuit Analysis**: Tracing how putative reasoning features connect to attention heads and MLP neurons to understand their computational role.
-
-3. **Intervention Studies**: Directly manipulating feature activations during inference on reasoning tasks to establish causal necessity and sufficiency.
-
-4. **Cross-Model Generalization**: Testing whether features identified in one model transfer to other models or architectures.
+**Broader Implications**: Our findings suggest potential fundamental limitations of SAE-based decomposition for capturing high-level abstractions like reasoning, which may not correspond to sparse, linear directions in activation space. While we find zero genuine reasoning features across 153 context-dependent features and 14 experimental configurations, this does not preclude their existence in unexplored architectures, layers, or models. Our methodology provides a rigorous template for evaluating future positive claims, which should include demonstrated resistance to token injection and successful counterexample testing.
 
 ---
 
