@@ -27,8 +27,8 @@ output_dir.mkdir(parents=True, exist_ok=True)
 # Figure 1: Token concentration and normalized entropy across layers
 # ============================================================================
 
-fig1_dir = Path("/home/exouser/reasoning-probing/results/64maxlen")
-model = "gemma-2-9b"
+fig1_dir = Path("/home/exouser/reasoning-probing/results/fig1")
+model = "gemma-3-4b-it"
 dataset = "s1k"
 
 # Check all available layers
