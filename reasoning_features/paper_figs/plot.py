@@ -3,6 +3,7 @@ import numpy as np
 import json
 from pathlib import Path
 
+
 plt.rcParams.update({
     'text.usetex': True,
     'font.family': 'serif',
@@ -16,30 +17,25 @@ plt.rcParams.update({
     'legend.fontsize': 9,
 })
 
-# Paths
+
 results_dir = Path("/home/exouser/reasoning-probing/results/cohens_d")
 output_dir = Path("/home/exouser/reasoning-probing/figs")
 output_dir.mkdir(parents=True, exist_ok=True)
 
-print("Generating figures for methodology paper...")
-print(f"Output directory: {output_dir}")
 
 # ============================================================================
 # Figure 1: Token concentration and normalized entropy across layers
 # ============================================================================
-print("\nGenerating Figure 1: Token concentration across layers...")
 
-# We need to load token_analysis.json for all layers of Gemma-3-12B-IT on s1K
-model = "gemma-3-12b-it"
+fig1_dir = Path("/home/exouser/reasoning-probing/results/64maxlen")
+model = "gemma-2-9b"
 dataset = "s1k"
 
 # Check all available layers
-model_dataset_path = results_dir / model / dataset
+model_dataset_path = fig1_dir / model / dataset
 available_layers = sorted([int(d.name.replace("layer", "")) 
-                          for d in model_dataset_path.iterdir() 
-                          if d.is_dir() and d.name.startswith("layer")])
-
-print(f"  Found layers: {available_layers}")
+                           for d in model_dataset_path.iterdir() 
+                           if d.is_dir() and d.name.startswith("layer")])
 
 layers_data = []
 for layer in available_layers:
@@ -81,19 +77,18 @@ if layers_data:
     ax2.legend(loc='best')
     
     plt.tight_layout()
-    output_path = output_dir / "fig1_token_concentration_layers.pdf"
+    output_path = output_dir / "token_concentration_layers.pdf"
     plt.savefig(output_path, bbox_inches='tight', dpi=300)
     plt.close()
     print(f"  Saved: {output_path}")
 else:
     print("  WARNING: No data found for Figure 1")
 
+
 # ============================================================================
 # Figure 2: Distribution of Cohen's d values across all features
 # ============================================================================
-print("\nGenerating Figure 2: Cohen's d distribution...")
 
-# Load feature_stats.json for Gemma-3-12B-IT layer 22 s1K
 layer = 22
 feature_stats_path = results_dir / "gemma-3-12b-it" / "s1k" / f"layer{layer}" / "feature_stats.json"
 
@@ -131,17 +126,17 @@ if feature_stats_path.exists():
     ax.grid(True, alpha=0.3, linestyle='--', axis='y')
     
     plt.tight_layout()
-    output_path = output_dir / "fig2_cohens_d_distribution.pdf"
+    output_path = output_dir / "cohens_d_distribution.pdf"
     plt.savefig(output_path, bbox_inches='tight', dpi=300)
     plt.close()
     print(f"  Saved: {output_path}")
 else:
     print("  WARNING: Feature stats file not found for Figure 2")
 
+
 # ============================================================================
 # Figure 3: Stacked bar chart of injection classifications
 # ============================================================================
-print("\nGenerating Figure 3: Token injection classification...")
 
 # Load injection results for all configurations
 configs = [
@@ -206,17 +201,18 @@ if all_data:
     ax.grid(True, alpha=0.3, linestyle='--', axis='y')
     
     plt.tight_layout()
-    output_path = output_dir / "fig3_injection_classification.pdf"
+    output_path = output_dir / "injection_classification.pdf"
     plt.savefig(output_path, bbox_inches='tight', dpi=300)
     plt.close()
     print(f"  Saved: {output_path}")
 else:
     print("  WARNING: No data found for Figure 3")
 
-print("\n" + "="*60)
+
+print("\n" + "=" * 60)
 print("Figure generation complete!")
 print(f"All figures saved to: {output_dir}")
-print("="*60)
+print("=" * 60)
 print("\nGenerated figures:")
 for fig_file in sorted(output_dir.glob("fig*.pdf")):
     print(f"  - {fig_file.name}")
