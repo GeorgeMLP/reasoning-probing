@@ -81,7 +81,6 @@ We employ a diverse set of injection strategies to test different hypotheses abo
 
 **Simple Token Injection** (inject 3 tokens):
 - **Prepend**: Insert tokens at the beginning of the text
-- **Append**: Insert tokens at the end of the text
 - **Intersperse**: Distribute tokens uniformly throughout the text
 - **Replace**: Substitute random words with injected tokens
 
@@ -91,7 +90,6 @@ We employ a diverse set of injection strategies to test different hypotheses abo
 
 **Contextual Injection**:
 - **Bigram Before**: Insert `[context, token]` pairs where `context` is a frequently preceding word
-- **Bigram After**: Insert `[token, context]` pairs where `context` is a frequently following word
 - **Trigram**: Insert `[before, token, after]` triplets based on context analysis
 - **Comma List**: Insert tokens as a comma-separated enumeration
 
