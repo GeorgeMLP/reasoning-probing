@@ -303,9 +303,9 @@ We conduct steering experiments on Gemma-3-12B-IT layer 22, using the top 3 feat
 
 | Feature | Baseline ($\gamma = 0$) AIME | Steered ($\gamma = 2$) AIME | Baseline GPQA | Steered GPQA |
 |---------|------------------------------|------------------------------|---------------|--------------|
-| [TBD] | [TBD]% | [TBD]% | [TBD]% | [TBD]% |
-| [TBD] | [TBD]% | [TBD]% | [TBD]% | [TBD]% |
-| [TBD] | [TBD]% | [TBD]% | [TBD]% | [TBD]% |
+| 1053 | 23.3% | 20.0% | [TBD]% | [TBD]% |
+| 0    | 16.7% | 10.0% | [TBD]% | [TBD]% |
+| 578  | 26.7% | 26.7% | [TBD]% | [TBD]% |
 
 As discussed in Section 5, this steering experiment serves as a supplementary sanity check rather than a primary line of evidence. Performance improvement (if observed) would not constitute definitive evidence of genuine reasoning capture, as superficial token-level interventions have been shown to yield substantial gains on these benchmarks without engaging reasoning mechanisms. Our results are expected to show [TBD: minimal change or slight degradation], consistent with features capturing spurious correlates rather than causal reasoning mechanisms.
 
