@@ -5,6 +5,7 @@ __pycache__/
 wandb/
 data/
 cache/
+figs/
 plots/
 visualizations/
 results/
