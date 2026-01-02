@@ -7,7 +7,7 @@ from pathlib import Path
 plt.rcParams.update({
     'text.usetex': True,
     'font.family': 'serif',
-    'font.serif': 'Computer Modern',
+    'font.serif': 'Times',
     'text.latex.preamble': r'\usepackage{amsmath,amsfonts,bm,mathtools}',
     'font.size': 10,
     'axes.labelsize': 11,
