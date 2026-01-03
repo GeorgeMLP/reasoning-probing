@@ -78,7 +78,7 @@ if layers_data:
     
     plt.tight_layout()
     output_path = output_dir / "token_concentration_layers.pdf"
-    plt.savefig(output_path, bbox_inches='tight', dpi=300)
+    plt.savefig(output_path, bbox_inches='tight')
     plt.close()
     print(f"  Saved: {output_path}")
 else:
@@ -127,7 +127,7 @@ if feature_stats_path.exists():
     
     plt.tight_layout()
     output_path = output_dir / "cohens_d_distribution.pdf"
-    plt.savefig(output_path, bbox_inches='tight', dpi=300)
+    plt.savefig(output_path, bbox_inches='tight')
     plt.close()
     print(f"  Saved: {output_path}")
 else:
@@ -202,7 +202,7 @@ if all_data:
     
     plt.tight_layout()
     output_path = output_dir / "injection_classification.pdf"
-    plt.savefig(output_path, bbox_inches='tight', dpi=300)
+    plt.savefig(output_path, bbox_inches='tight')
     plt.close()
     print(f"  Saved: {output_path}")
 else:
@@ -214,5 +214,303 @@ print("Figure generation complete!")
 print(f"All figures saved to: {output_dir}")
 print("=" * 60)
 print("\nGenerated figures:")
-for fig_file in sorted(output_dir.glob("fig*.pdf")):
+for fig_file in sorted(output_dir.glob("*.pdf")):
     print(f"  - {fig_file.name}")
+
+
+# ============================================================================
+# APPENDIX FIGURES
+# ============================================================================
+
+print("\n" + "=" * 60)
+print("GENERATING APPENDIX FIGURES")
+print("=" * 60)
+
+# ============================================================================
+# Figure A1: Metric comparison rankings
+# ============================================================================
+
+# Load top features from each metric
+metrics_data = {}
+for metric, metric_name in [("cohens_d", "Cohen's d"), ("roc_auc", "ROC-AUC"), ("freq", "Frequency Ratio")]:
+    if metric == "cohens_d":
+        path = results_dir / "gemma-3-4b-it" / "s1k" / "layer22"
+    else:
+        path = Path(f"/home/exouser/reasoning-probing/results/{metric}/gemma-3-4b-it/s1k/layer22")
+    
+    rf_path = path / "reasoning_features.json"
+    if rf_path.exists():
+        with open(rf_path) as f:
+            data = json.load(f)
+            features = data.get("features", [])
+            
+            # Get feature indices and their ranks
+            feature_indices = [f['feature_index'] for f in features[:100]]
+            metrics_data[metric_name] = set(feature_indices)
+
+# Calculate overlaps
+if len(metrics_data) == 3:
+    cohens = metrics_data["Cohen's d"]
+    auc = metrics_data["ROC-AUC"]
+    freq = metrics_data["Frequency Ratio"]
+    
+    # Compute pairwise Jaccard similarities
+    cohens_auc = len(cohens & auc) / len(cohens | auc)
+    cohens_freq = len(cohens & freq) / len(cohens | freq)
+    auc_freq = len(auc & freq) / len(auc | freq)
+    
+    # Compute three-way overlap
+    all_three = len(cohens & auc & freq)
+    
+    fig, ax = plt.subplots(figsize=(4.5, 3))
+    
+    metrics = ["Cohen's $d$\nvs AUC", "Cohen's $d$\nvs Freq", "AUC vs\nFreq"]
+    similarities = [cohens_auc, cohens_freq, auc_freq]
+    
+    bars = ax.bar(range(len(metrics)), similarities, color='steelblue', alpha=0.8, width=0.6)
+    ax.set_ylabel('Jaccard Similarity')
+    ax.set_xticks(range(len(metrics)))
+    ax.set_xticklabels(metrics, fontsize=8)
+    ax.set_ylim(0, 1)
+    ax.grid(True, alpha=0.3, linestyle='--', axis='y')
+    
+    # Add value labels
+    for i, (bar, val) in enumerate(zip(bars, similarities)):
+        ax.text(i, val + 0.02, f'{val:.2f}', ha='center', fontsize=9)
+    
+    # Add annotation for three-way overlap
+    ax.text(0.5, 0.92, f'Three-way overlap: {all_three} features', 
+            transform=ax.transAxes, ha='center', fontsize=8,
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.tight_layout()
+    output_path = output_dir / "metric_comparison_rankings.pdf"
+    plt.savefig(output_path, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved: {output_path}")
+
+# ============================================================================
+# Figure A2: Token concentration distributions (violin plots)
+# ============================================================================
+
+# Collect concentration data for all main configurations
+concentration_data = []
+labels_data = []
+
+for model, layers in [("gemma-3-12b-it", [17, 22, 27]), ("gemma-3-4b-it", [17, 22, 27])]:
+    for layer in layers:
+        ta_path = results_dir / model / "s1k" / f"layer{layer}" / "token_analysis.json"
+        if ta_path.exists():
+            with open(ta_path) as f:
+                data = json.load(f)
+                features = data.get("features", [])
+                concentrations = [f.get("token_concentration", 0) for f in features]
+                
+                if concentrations:
+                    concentration_data.append(concentrations)
+                    model_short = "G3-12B" if "12b" in model else "G3-4B"
+                    labels_data.append(f"{model_short}\nL{layer}")
+
+if concentration_data:
+    fig, ax = plt.subplots(figsize=(8, 3.5))
+    
+    parts = ax.violinplot(concentration_data, positions=range(len(concentration_data)),
+                          showmeans=False, showmedians=True, widths=0.7)
+    
+    # Color the violins
+    for pc in parts['bodies']:
+        pc.set_facecolor('steelblue')
+        pc.set_alpha(0.6)
+    
+    # Add horizontal line at 0.5 threshold
+    ax.axhline(0.5, color='red', linestyle='--', linewidth=1.5, alpha=0.7,
+               label='High dependency threshold')
+    
+    ax.set_ylabel('Token Concentration')
+    ax.set_xticks(range(len(labels_data)))
+    ax.set_xticklabels(labels_data, fontsize=7)
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend(loc='upper left', fontsize=8)
+    ax.grid(True, alpha=0.3, linestyle='--', axis='y')
+    
+    plt.tight_layout()
+    output_path = output_dir / "token_concentration_distributions.pdf"
+    plt.savefig(output_path, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved: {output_path}")
+
+# ============================================================================
+# Figure A3: Strategy comparison box plots
+# ============================================================================
+
+strategies_to_plot = ["prepend", "intersperse", "inject_bigram", "inject_trigram", 
+                      "bigram_before", "trigram"]
+strategy_labels = ["Prepend", "Intersperse", "Bigram", "Trigram", "Bigram+Ctx", "Trigram+Ctx"]
+
+# Use Gemma-3-12B-IT layer 22 s1K as representative
+inj_path = results_dir / "gemma-3-12b-it" / "s1k" / "layer22" / "injection_results.json"
+
+if inj_path.exists():
+    with open(inj_path) as f:
+        data = json.load(f)
+        features = data.get("features", [])
+        
+        strategy_values = {s: [] for s in strategies_to_plot}
+        for feat in features:
+            for strat, metrics in feat.get("strategies", {}).items():
+                if strat in strategies_to_plot:
+                    strategy_values[strat].append(metrics.get("cohens_d", 0))
+        
+        fig, ax = plt.subplots(figsize=(6, 3.5))
+        
+        data_to_plot = [strategy_values[s] for s in strategies_to_plot]
+        bp = ax.boxplot(data_to_plot, tick_labels=strategy_labels, patch_artist=True)
+        
+        for patch in bp['boxes']:
+            patch.set_facecolor('lightblue')
+            patch.set_alpha(0.7)
+        
+        ax.axhline(0.8, color='#d62728', linestyle='--', linewidth=1, alpha=0.7, label='Large effect')
+        ax.axhline(0.5, color='#ff7f0e', linestyle='--', linewidth=1, alpha=0.7, label='Medium effect')
+        ax.axhline(0.2, color='#ffbb78', linestyle='--', linewidth=1, alpha=0.7, label='Small effect')
+        
+        ax.set_ylabel(r"Cohen's $d$ (Injection Effect)")
+        ax.set_xlabel('Injection Strategy')
+        ax.grid(True, alpha=0.3, linestyle='--', axis='y')
+        ax.legend(loc='upper right', fontsize=7)
+        ax.tick_params(axis='x', rotation=15)
+        
+        plt.tight_layout()
+        output_path = output_dir / "strategy_comparison.pdf"
+        plt.savefig(output_path, bbox_inches='tight')
+        plt.close()
+        print(f"  Saved: {output_path}")
+
+# ============================================================================
+# Figure A4: LLM iterations distribution
+# ============================================================================
+
+# Collect iteration counts from all interpretations
+all_iterations = []
+
+configs = [
+    ("gemma-3-12b-it", [17, 22, 27]),
+    ("gemma-3-4b-it", [17, 22, 27]),
+    ("deepseek-r1-distill-llama-8b", [19]),
+]
+
+for model, layers in configs:
+    for layer in layers:
+        for dataset in ["s1k", "general_inquiry_cot"]:
+            interp_path = results_dir / model / dataset / f"layer{layer}" / "feature_interpretations.json"
+            if interp_path.exists():
+                with open(interp_path) as f:
+                    data = json.load(f)
+                    features = data.get("features", [])
+                    for f in features:
+                        iterations = f.get("iterations_used", 0)
+                        all_iterations.append(iterations)
+
+if all_iterations:
+    fig, ax = plt.subplots(figsize=(4.5, 3))
+    
+    # Histogram
+    bins = np.arange(0.5, max(all_iterations) + 1.5, 1)
+    ax.hist(all_iterations, bins=bins, color='steelblue', alpha=0.8, edgecolor='white')
+    
+    ax.set_xlabel('Iterations to Convergence')
+    ax.set_ylabel('Number of Features')
+    ax.set_xticks(range(1, max(all_iterations) + 1))
+    ax.grid(True, alpha=0.3, linestyle='--', axis='y')
+    
+    # Add statistics
+    mean_iter = np.mean(all_iterations)
+    median_iter = np.median(all_iterations)
+    ax.axvline(mean_iter, color='red', linestyle='--', linewidth=1.5, 
+               label=f'Mean: {mean_iter:.1f}')
+    ax.axvline(median_iter, color='orange', linestyle=':', linewidth=1.5,
+               label=f'Median: {median_iter:.0f}')
+    ax.legend(loc='upper right', fontsize=8)
+    
+    plt.tight_layout()
+    output_path = output_dir / "llm_iterations_distribution.pdf"
+    plt.savefig(output_path, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved: {output_path}")
+
+# ============================================================================
+# Figure A5: Dataset overlap Venn-like visualization
+# ============================================================================
+
+# Calculate overlaps for each model and layer
+overlap_data = []
+
+for model, layers in [("gemma-3-12b-it", [17, 22, 27]), ("gemma-3-4b-it", [17, 22, 27])]:
+    for layer in layers:
+        s1k_path = results_dir / model / "s1k" / f"layer{layer}" / "reasoning_features.json"
+        gen_path = results_dir / model / "general_inquiry_cot" / f"layer{layer}" / "reasoning_features.json"
+        
+        if s1k_path.exists() and gen_path.exists():
+            with open(s1k_path) as f:
+                s1k_indices = set(json.load(f).get("feature_indices", []))
+            with open(gen_path) as f:
+                gen_indices = set(json.load(f).get("feature_indices", []))
+            
+            intersection = len(s1k_indices & gen_indices)
+            union = len(s1k_indices | gen_indices)
+            jaccard = intersection / union if union > 0 else 0
+            
+            model_short = "G3-12B" if "12b" in model else "G3-4B"
+            overlap_data.append({
+                'label': f"{model_short} L{layer}",
+                's1k_only': len(s1k_indices - gen_indices),
+                'gen_only': len(gen_indices - s1k_indices),
+                'shared': intersection,
+                'jaccard': jaccard,
+            })
+
+if overlap_data:
+    labels = [d['label'] for d in overlap_data]
+    s1k_only = [d['s1k_only'] for d in overlap_data]
+    shared = [d['shared'] for d in overlap_data]
+    gen_only = [d['gen_only'] for d in overlap_data]
+    jaccard_vals = [d['jaccard'] for d in overlap_data]
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3))
+    
+    # Stacked bar chart
+    x = np.arange(len(labels))
+    width = 0.6
+    
+    ax1.bar(x, s1k_only, width, label='s1K only', color='#1f77b4', alpha=0.8)
+    ax1.bar(x, shared, width, bottom=s1k_only, label='Shared', color='#2ca02c', alpha=0.8)
+    ax1.bar(x, gen_only, width, bottom=np.array(s1k_only)+np.array(shared), 
+            label='Gen. Inq. only', color='#ff7f0e', alpha=0.8)
+    
+    ax1.set_ylabel('Number of Features')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(labels, rotation=45, ha='right', fontsize=7)
+    ax1.legend(loc='upper left', fontsize=7)
+    ax1.grid(True, alpha=0.3, linestyle='--', axis='y')
+    
+    # Jaccard similarity
+    ax2.bar(x, jaccard_vals, width=0.6, color='steelblue', alpha=0.8)
+    ax2.set_ylabel('Jaccard Similarity')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(labels, rotation=45, ha='right', fontsize=7)
+    ax2.set_ylim(0, 1)
+    ax2.grid(True, alpha=0.3, linestyle='--', axis='y')
+    
+    # Add value labels
+    for i, val in enumerate(jaccard_vals):
+        ax2.text(i, val + 0.02, f'{val:.2f}', ha='center', fontsize=8)
+    
+    plt.tight_layout()
+    output_path = output_dir / "dataset_overlap.pdf"
+    plt.savefig(output_path, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved: {output_path}")
+
+print("\n" + "=" * 60)
+print("All appendix figures generated!")
+print("=" * 60)

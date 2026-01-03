@@ -303,9 +303,9 @@ We conduct steering experiments on Gemma-3-12B-IT layer 22, using the top 3 feat
 
 | Feature | Baseline ($\gamma = 0$) AIME | Steered ($\gamma = 2$) AIME | Baseline GPQA | Steered GPQA |
 |---------|------------------------------|------------------------------|---------------|--------------|
-| 1053 | 23.3% | 20.0% | [TBD]% | [TBD]% |
-| 0    | 16.7% | 10.0% | [TBD]% | [TBD]% |
-| 578  | 26.7% | 26.7% | [TBD]% | [TBD]% |
+| 1053 | 26.7% | 20.0% | 37.9% | 13.6% |
+| 0    | 26.7% | 10.0% | 37.9% | 20.2% |
+| 578  | 26.7% | 26.7% | 37.9% | 33.3% |
 
 As discussed in Section 5, this steering experiment serves as a supplementary sanity check rather than a primary line of evidence. Performance improvement (if observed) would not constitute definitive evidence of genuine reasoning capture, as superficial token-level interventions have been shown to yield substantial gains on these benchmarks without engaging reasoning mechanisms. Our results are expected to show [TBD: minimal change or slight degradation], consistent with features capturing spurious correlates rather than causal reasoning mechanisms.
 
@@ -320,13 +320,3 @@ Our investigation is subject to several important limitations that should inform
 **Methodological Coverage**: While we test ten diverse token injection strategies, we cannot exhaustively enumerate all possible linguistic patterns. Our LLM-guided analysis partially addresses this limitation through systematic exploration of the pattern space, though it relies on Gemini 3 Pro's ability to generate valid counterexamples. The LLM's biases may influence which patterns are explored, though we mitigate this through empirical validation of all counterexamples and human verification of all interpretations (provided in the appendix).
 
 **Broader Implications**: Our findings suggest potential fundamental limitations of SAE-based decomposition for capturing high-level abstractions like reasoning, which may not correspond to sparse, linear directions in activation space. While we find zero genuine reasoning features across 153 context-dependent features and 14 experimental configurations, this does not preclude their existence in unexplored architectures, layers, or models. Our methodology provides a rigorous template for evaluating future positive claims, which should include demonstrated resistance to token injection and successful counterexample testing.
-
----
-
-## References
-
-Cohen, J. (1988). *Statistical Power Analysis for the Behavioral Sciences* (2nd ed.). Lawrence Erlbaum Associates.
-
-Mann, H. B., & Whitney, D. R. (1947). On a test of whether one of two random variables is stochastically larger than the other. *Annals of Mathematical Statistics*, 18(1), 50-60.
-
-[Additional references to be added based on related work section]
