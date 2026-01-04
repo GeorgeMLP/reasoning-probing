@@ -1,6 +1,6 @@
 # Appendix: Supplementary Experimental Results
 
-This appendix provides additional experimental results and analyses that complement the main text. Section A reports results on Gemma-2 models (Gemma-2-9B and Gemma-2-2B) to assess architectural generalization. Section B examines alternative feature ranking metrics (ROC-AUC and frequency ratio) to validate robustness of our methodology. Section C presents detailed statistics on token dependency, injection strategies, and dataset overlap from the main experiments.
+This appendix provides additional experimental results and analyses that complement the main text. Section A reports results on Gemma-2 models (Gemma-2-9B and Gemma-2-2B) to assess architectural generalization. Section B examines alternative feature ranking metrics (ROC-AUC and frequency ratio) to validate robustness of our methodology. Section C presents detailed statistics on token dependency, injection strategies, and dataset overlap from the main experiments. Section D documents all hyperparameters used across the experimental pipeline. Additionally, we provide complete LLM-generated interpretations for all 192 analyzed context-dependent features in a separate LaTeX document (`docs/feature_interpretations.tex`), which includes refined interpretations, classifications, and false positive/negative counterexamples for each feature.
 
 ## A. Experimental Results on Additional Models
 
@@ -194,3 +194,39 @@ The Jaccard similarities range from 0.058 to 0.327, indicating low to moderate o
 This low overlap suggests that different reasoning corpora activate largely distinct feature subsets, which may reflect genuine differences in reasoning style (mathematical vs. general inquiry) or, alternatively, dataset-specific spurious correlations (e.g., LaTeX notation in s1K, conversational markers in General Inquiry). To distinguish these interpretations, we examined shared features using LLM analysis. All analyzed shared context-dependent features were classified as confounds, with patterns including mathematical notation detectors, formal academic phrases, and meta-cognitive markers that appear in both mathematical and general reasoning contexts but also in non-reasoning text with similar stylistic characteristics.
 
 **Figure A5**: Stacked bar chart and Jaccard similarity showing feature set overlap between s1K and General Inquiry CoT for each model and layer. Path: `figs/dataset_overlap.pdf`
+
+## D. Hyperparameter Settings
+
+This section provides a comprehensive specification of all hyperparameters used across our experimental pipeline.
+
+### D.1 Feature Detection Stage
+
+For identifying candidate reasoning features via statistical testing, we used 1,000 samples from each corpus (reasoning and non-reasoning), with each sample truncated to a maximum of 64 tokens. Features were ranked by Cohen's d (for the main experiments) or by alternative metrics (for appendix experiments). We imposed three simultaneous thresholds: minimum Cohen's d of 0.3, maximum Bonferroni-corrected p-value of 0.01 (Mann-Whitney U test), and minimum ROC-AUC of 0.6. From features meeting these criteria, we selected the top 100 ranked by the primary metric.
+
+For token dependency analysis within this stage, we extracted the top 30 tokens per feature based on mean activation, requiring a minimum of 5 occurrences for inclusion. We similarly extracted the top 20 bigrams (minimum 3 occurrences) and top 10 trigrams (minimum 2 occurrences) for each feature. Processing used a batch size of 16 for activation collection on all models.
+
+### D.2 Token Injection Stage
+
+Token injection experiments tested the top 100 features from the detection stage using 500 samples per condition (baseline and injected non-reasoning text). We employed eight injection strategies: prepend, intersperse, replace, inject\_bigram, inject\_trigram, bigram\_before, trigram, and comma\_list. For simple token strategies (prepend, intersperse, replace, comma\_list), we injected 3 tokens selected from the top 10 tokens for that feature. For bigram-based strategies (inject\_bigram, bigram\_before), we injected 2 bigrams selected from the top 20 bigrams. For trigram-based strategies (inject\_trigram, trigram), we injected 1 trigram selected from the top 10 trigrams.
+
+Classification thresholds followed Cohen's conventions: token-driven required d greater than or equal to 0.8 with p less than 0.01, partially token-driven required d between 0.5 and 0.8 with p less than 0.01, weakly token-driven required d between 0.2 and 0.5 with p less than 0.05, and context-dependent corresponded to d less than 0.2 or p greater than or equal to 0.05. For each feature, we selected the best-performing strategy (highest Cohen's d) for final classification. All samples were truncated to 64 tokens with batch size 16 for processing.
+
+### D.3 LLM-Guided Interpretation Stage
+
+For context-dependent features identified in the injection stage, we randomly sampled up to 20 features per configuration for LLM-guided analysis using Google Gemini 3 Pro (accessed via OpenRouter API). The iterative protocol ran for a maximum of 10 iterations per feature, with early stopping when reaching 3 valid false positives and 3 valid false negatives.
+
+The activation threshold for counterexample validation was set at 0.5 times the maximum activation observed on reasoning samples for that feature. False positives (non-reasoning text) were considered valid if their maximum activation exceeded this threshold, while false negatives (reasoning text) were valid if their maximum activation fell below 0.1 times the threshold. In each iteration, the LLM generated 5 candidate examples per category (10 total per iteration).
+
+Temperature settings varied by task: hypothesis generation and final interpretation used temperature 0.3 to ensure consistency and reduce variability, while counterexample generation used temperature 0.8 to encourage diversity in proposed patterns.
+
+### D.4 Steering Experiment Stage
+
+Steering experiments were conducted exclusively on Gemma-3-12B-Instruct layer 22, selecting the top 3 features ranked by Cohen's d from the s1K dataset. We tested two gamma values: 0.0 (baseline, no steering) and 2.0 (positive amplification). The steering formula scaled the intervention by the maximum feature activation observed in the reasoning corpus for that feature.
+
+For text generation, we used maximum 16,384 new tokens with sampling temperature 0.6 and nucleus sampling (top-p) threshold 0.95. All prompts used the model's chat template for proper formatting. Evaluation used one-shot chain-of-thought prompting with a single exemplar for each benchmark. For AIME 2024 (30 problems), we evaluated exact numerical answer matching. For GPQA Diamond (198 problems), we evaluated multiple-choice accuracy by extracting the letter corresponding to the selected answer.
+
+### D.5 Model and SAE Configuration
+
+All Gemma-3 models used the GemmaScope-2 SAE release with width 16,384 features per layer and small L0 regularization. DeepSeek-R1-Distill-Llama-8B used an SAE with width 65,536 trained specifically on reasoning datasets. All models were loaded in bfloat16 precision and run on a single NVIDIA A100 80GB GPU.
+
+For Gemma-2 models (reported in Appendix A), we used similar configurations: Gemma-2-9B with GemmaScope release "gemma-scope-2b-pt-res-canonical" and Gemma-2-2B with the same release family, both using SAEs with 16,384 features per layer. Alternative metric experiments (Appendix B) used identical model and SAE configurations to the Cohen's d experiments, differing only in the feature ranking criterion.
