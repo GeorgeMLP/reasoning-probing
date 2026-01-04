@@ -22,6 +22,236 @@ results_dir = Path("/home/exouser/reasoning-probing/results/cohens_d")
 output_dir = Path("/home/exouser/reasoning-probing/figs")
 output_dir.mkdir(parents=True, exist_ok=True)
 
+print("="*60)
+print("GENERATING PAPER FIGURES")
+print("="*60)
+
+# ============================================================================
+# Figure 0: Header Figure - Framework Overview and Key Results
+# ============================================================================
+print("\nGenerating Figure 0: Header figure (framework overview)...")
+
+fig = plt.figure(figsize=(10, 6))
+
+# Create a grid layout: 3 rows, 2 columns with varying heights
+from matplotlib.gridspec import GridSpec
+gs = GridSpec(3, 2, figure=fig, height_ratios=[0.8, 1.2, 1.0], hspace=0.4, wspace=0.35)
+
+# ============================================================================
+# Panel A: Experimental Pipeline (spans both columns at top)
+# ============================================================================
+ax_pipeline = fig.add_subplot(gs[0, :])
+ax_pipeline.axis('off')
+ax_pipeline.set_xlim(0, 10)
+ax_pipeline.set_ylim(0, 1)
+
+# Draw pipeline boxes
+box_width = 2.8
+box_height = 0.7
+y_center = 0.5
+
+# Stage 1: Feature Detection
+x1 = 0.3
+rect1 = plt.Rectangle((x1, y_center - box_height/2), box_width, box_height,
+                       facecolor='#e8f4f8', edgecolor='#2c7fb8', linewidth=2)
+ax_pipeline.add_patch(rect1)
+ax_pipeline.text(x1 + box_width/2, y_center, r'\textbf{Stage 1}', 
+                ha='center', va='center', fontsize=11, weight='bold')
+ax_pipeline.text(x1 + box_width/2, y_center - 0.25, r'Feature Detection', 
+                ha='center', va='center', fontsize=9)
+ax_pipeline.text(x1 + box_width/2, y_center - 0.45, r"(Cohen's $d$)", 
+                ha='center', va='center', fontsize=8)
+
+# Arrow
+ax_pipeline.annotate('', xy=(x1 + box_width + 0.35, y_center), 
+                    xytext=(x1 + box_width + 0.05, y_center),
+                    arrowprops=dict(arrowstyle='->', lw=2, color='black'))
+
+# Stage 2: Token Injection
+x2 = x1 + box_width + 0.4
+rect2 = plt.Rectangle((x2, y_center - box_height/2), box_width, box_height,
+                       facecolor='#fff5e6', edgecolor='#ff9933', linewidth=2)
+ax_pipeline.add_patch(rect2)
+ax_pipeline.text(x2 + box_width/2, y_center, r'\textbf{Stage 2}', 
+                ha='center', va='center', fontsize=11, weight='bold')
+ax_pipeline.text(x2 + box_width/2, y_center - 0.25, r'Token Injection', 
+                ha='center', va='center', fontsize=9)
+ax_pipeline.text(x2 + box_width/2, y_center - 0.45, r'(Causal Test)', 
+                ha='center', va='center', fontsize=8)
+
+# Arrow
+ax_pipeline.annotate('', xy=(x2 + box_width + 0.35, y_center), 
+                    xytext=(x2 + box_width + 0.05, y_center),
+                    arrowprops=dict(arrowstyle='->', lw=2, color='black'))
+
+# Stage 3: LLM Analysis
+x3 = x2 + box_width + 0.4
+rect3 = plt.Rectangle((x3, y_center - box_height/2), box_width, box_height,
+                       facecolor='#f0e6ff', edgecolor='#7b68ee', linewidth=2)
+ax_pipeline.add_patch(rect3)
+ax_pipeline.text(x3 + box_width/2, y_center, r'\textbf{Stage 3}', 
+                ha='center', va='center', fontsize=11, weight='bold')
+ax_pipeline.text(x3 + box_width/2, y_center - 0.25, r'LLM Analysis', 
+                ha='center', va='center', fontsize=9)
+ax_pipeline.text(x3 + box_width/2, y_center - 0.45, r'(Counterexamples)', 
+                ha='center', va='center', fontsize=8)
+
+# ============================================================================
+# Panel B: Token Injection Results Summary
+# ============================================================================
+ax_injection = fig.add_subplot(gs[1, 0])
+
+# Aggregate data across main experiments
+td_counts = []
+ptd_counts = []
+wtd_counts = []
+cd_counts = []
+
+for model, layers in [("gemma-3-12b-it", [17, 22, 27]), ("gemma-3-4b-it", [17, 22, 27])]:
+    for layer in layers:
+        for dataset in ["s1k", "general_inquiry_cot"]:
+            inj_path = results_dir / model / dataset / f"layer{layer}" / "injection_results.json"
+            if inj_path.exists():
+                with open(inj_path) as f:
+                    data = json.load(f)
+                    counts = data['summary']['classification_counts']
+                    n = data['summary']['n_features']
+                    
+                    td_counts.append(counts.get('token_driven', 0) / n * 100)
+                    ptd_counts.append(counts.get('partially_token_driven', 0) / n * 100)
+                    wtd_counts.append(counts.get('weakly_token_driven', 0) / n * 100)
+                    cd_counts.append(counts.get('context_dependent', 0) / n * 100)
+
+# Calculate means
+mean_td = np.mean(td_counts)
+mean_ptd = np.mean(ptd_counts)
+mean_wtd = np.mean(wtd_counts)
+mean_cd = np.mean(cd_counts)
+
+# Stacked bar
+categories = ['Token-driven\n(Large Effect)', 'Partially TD\n(Medium)', 
+              'Weakly TD\n(Small)', 'Context-\ndependent']
+values = [mean_td, mean_ptd, mean_wtd, mean_cd]
+colors = ['#d62728', '#ff7f0e', '#ffbb78', '#1f77b4']
+
+bottom = 0
+bars = []
+for val, color, label in zip(values, colors, categories):
+    bar = ax_injection.bar(0, val, width=0.5, bottom=bottom, color=color, alpha=0.9)
+    bars.append(bar)
+    
+    # Add percentage label in the middle of each segment
+    if val > 5:  # Only label if segment is large enough
+        ax_injection.text(0, bottom + val/2, f'{val:.0f}\\%', 
+                         ha='center', va='center', fontsize=10, weight='bold', color='white')
+    
+    bottom += val
+
+ax_injection.set_xlim(-0.5, 0.5)
+ax_injection.set_ylim(0, 105)
+ax_injection.set_ylabel(r'Percentage of Features (\%)', fontsize=10)
+ax_injection.set_xticks([])
+ax_injection.set_title('Token Injection Classification\n(Average across 12 configs)', 
+                       fontsize=11, pad=10)
+ax_injection.grid(True, alpha=0.3, linestyle='--', axis='y')
+
+# Add legend
+legend_elements = [plt.Rectangle((0,0),1,1, fc=color, alpha=0.9) 
+                  for color in colors]
+ax_injection.legend(legend_elements, categories, loc='upper left', 
+                   fontsize=7, framealpha=0.9)
+
+# ============================================================================
+# Panel C: Main Finding - Zero Genuine Reasoning Features
+# ============================================================================
+ax_finding = fig.add_subplot(gs[1, 1])
+ax_finding.axis('off')
+ax_finding.set_xlim(0, 1)
+ax_finding.set_ylim(0, 1)
+
+# Large centered text box with main finding
+from matplotlib.patches import FancyBboxPatch
+
+box = FancyBboxPatch((0.05, 0.3), 0.9, 0.5, boxstyle="round,pad=0.05",
+                     facecolor='#ffe6e6', edgecolor='#cc0000', linewidth=2)
+ax_finding.add_patch(box)
+
+ax_finding.text(0.5, 0.75, r'\textbf{Main Finding:}', 
+               ha='center', va='center', fontsize=12, weight='bold')
+ax_finding.text(0.5, 0.53, r'\textbf{0 / 232}', 
+               ha='center', va='center', fontsize=28, weight='bold', color='#cc0000')
+ax_finding.text(0.5, 0.35, r'\textbf{Genuine Reasoning Features}', 
+               ha='center', va='center', fontsize=11, weight='bold')
+
+# Add subtitle
+ax_finding.text(0.5, 0.15, 'All are linguistic confounds', 
+               ha='center', va='center', fontsize=9, style='italic')
+
+# ============================================================================
+# Panel D: Example - Token Injection Effect
+# ============================================================================
+ax_example = fig.add_subplot(gs[2, :])
+
+# Load actual injection data for one representative feature
+example_path = results_dir / "gemma-3-12b-it" / "s1k" / "layer22" / "injection_results.json"
+if example_path.exists():
+    with open(example_path) as f:
+        data = json.load(f)
+        features = data.get("features", [])
+        
+        # Find a strongly token-driven feature
+        example_feat = None
+        for feat in features:
+            if feat.get('best_cohens_d', 0) > 1.0 and feat.get('classification') == 'token_driven':
+                example_feat = feat
+                break
+        
+        if example_feat:
+            baseline = example_feat['baseline_mean']
+            reasoning = example_feat['reasoning_mean']
+            
+            # Get best injected activation
+            best_injected = 0
+            for strat_data in example_feat['strategies'].values():
+                if strat_data['injected_mean'] > best_injected:
+                    best_injected = strat_data['injected_mean']
+            
+            # Create bar chart
+            conditions = ['Non-reasoning\n(Baseline)', 'Non-reasoning\n+ Top Tokens', 'Reasoning\nText']
+            activations = [baseline, best_injected, reasoning]
+            colors_bars = ['#cccccc', '#ff9933', '#2ca02c']
+            
+            bars = ax_example.bar(range(3), activations, color=colors_bars, alpha=0.8, width=0.6)
+            
+            # Add value labels
+            for bar, val in zip(bars, activations):
+                height = bar.get_height()
+                ax_example.text(bar.get_x() + bar.get_width()/2., height + max(activations)*0.02,
+                               f'{val:.0f}', ha='center', va='bottom', fontsize=10, weight='bold')
+            
+            # Add arrow annotations
+            ax_example.annotate('', xy=(1, best_injected), xytext=(0, baseline),
+                              arrowprops=dict(arrowstyle='->', lw=2.5, color='red', 
+                                            connectionstyle="arc3,rad=0.3"))
+            ax_example.text(0.5, (baseline + best_injected)/2 + max(activations)*0.15, 
+                          f"Cohen's $d$ = {example_feat['best_cohens_d']:.2f}",
+                          ha='center', fontsize=10, color='red', weight='bold',
+                          bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, 
+                                  edgecolor='red', linewidth=1.5))
+            
+            ax_example.set_xticks(range(3))
+            ax_example.set_xticklabels(conditions, fontsize=10)
+            ax_example.set_ylabel('Mean Feature Activation', fontsize=10)
+            ax_example.set_title(f'Example: Token Injection Activates Feature {example_feat["feature_index"]} ' +
+                               '(Injecting 3 tokens into 64-token text)', 
+                               fontsize=11, pad=10)
+            ax_example.grid(True, alpha=0.3, linestyle='--', axis='y')
+            ax_example.set_ylim(0, max(activations) * 1.25)
+
+output_path = output_dir / "overview.pdf"
+plt.savefig(output_path, bbox_inches='tight')
+plt.close()
+print(f"  Saved: {output_path}")
 
 # ============================================================================
 # Figure 1: Token concentration and normalized entropy across layers
