@@ -771,9 +771,9 @@ def main():
                         help="Threshold for 'active' tokens as percentage of max activation (0.0 to 1.0). "
                              "Tokens with activation >= max_activation * threshold are considered active.")
     parser.add_argument("--strategies", type=str, nargs="+",
-                        default=["prepend", "append", "intersperse", "replace", 
+                        default=["prepend", "intersperse", "replace", 
                                  "inject_bigram", "inject_trigram",
-                                 "bigram_before", "bigram_after", "trigram", "comma_list"],
+                                 "bigram_before", "trigram", "comma_list"],
                         help="Injection strategies to test. Options: prepend, append, intersperse, "
                              "replace, inject_bigram, inject_trigram, bigram_before, bigram_after, "
                              "trigram, comma_list, active_trigram")

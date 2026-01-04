@@ -8,7 +8,6 @@ for layer in 17 22 27; do
         --n-inject 3 \
         --n-inject-bigram 2 \
         --n-inject-trigram 1 \
-        --active-trigram-threshold 0.5 \
         --n-samples 500 \
         --reasoning-dataset s1k \
         --save-dir results/cohens_d/gemma-3-4b-it/s1k/layer$layer \
@@ -23,7 +22,6 @@ for layer in 17 22 27; do
         --n-inject 3 \
         --n-inject-bigram 2 \
         --n-inject-trigram 1 \
-        --active-trigram-threshold 0.5 \
         --n-samples 500 \
         --reasoning-dataset general_inquiry_cot \
         --save-dir results/cohens_d/gemma-3-4b-it/general_inquiry_cot/layer$layer \
