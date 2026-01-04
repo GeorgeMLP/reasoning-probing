@@ -312,7 +312,7 @@ for model, layers in [("gemma-3-12b-it", [17, 22, 27]), ("gemma-3-4b-it", [17, 2
                     labels_data.append(f"{model_short}\nL{layer}")
 
 if concentration_data:
-    fig, ax = plt.subplots(figsize=(8, 3.5))
+    fig, ax = plt.subplots(figsize=(6, 3.5))
     
     parts = ax.violinplot(concentration_data, positions=range(len(concentration_data)),
                           showmeans=False, showmedians=True, widths=0.7)
