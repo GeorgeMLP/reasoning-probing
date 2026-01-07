@@ -6,8 +6,9 @@ that show differential activation between reasoning and non-reasoning text.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Literal
 import numpy as np
+from einops import reduce
 from scipy.stats import mannwhitneyu, ttest_ind
 from sklearn.metrics import roc_auc_score
 import warnings
@@ -175,7 +176,7 @@ class ReasoningFeatureDetector:
     def __init__(
         self,
         activations: FeatureActivations,
-        aggregation: str = "max",
+        aggregation: Literal["max", "mean", "sum"] = "max",
         score_weights: Optional[dict] = None,
     ):
         """
@@ -203,14 +204,21 @@ class ReasoningFeatureDetector:
         elif aggregation == "mean":
             self.agg_acts = activations.get_mean_activations()
         elif aggregation == "sum":
-            self.agg_acts = activations.activations.sum(dim=1)
+            # sum over sequence dimension
+            self.agg_acts = reduce(
+                activations.activations, 'samples seq features -> samples features', 'sum'
+            )
         else:
             raise ValueError(f"Unknown aggregation: {aggregation}")
         
         # Get masks
         self.reasoning_mask = activations.get_reasoning_mask()
-        self.n_reasoning = self.reasoning_mask.sum().item()
-        self.n_nonreasoning = (~self.reasoning_mask).sum().item()
+        self.n_reasoning = int(reduce(
+            self.reasoning_mask.float(), 'samples -> ', 'sum'
+        ).item())
+        self.n_nonreasoning = int(reduce(
+            (~self.reasoning_mask).float(), 'samples -> ', 'sum'
+        ).item())
         
         # Cache for computed stats
         self._feature_stats: Optional[list[FeatureStats]] = None
@@ -221,9 +229,9 @@ class ReasoningFeatureDetector:
         reasoning_acts = acts[self.reasoning_mask.numpy()]
         nonreasoning_acts = acts[~self.reasoning_mask.numpy()]
         
-        # Basic statistics
-        mean_r = float(np.mean(reasoning_acts))
-        mean_nr = float(np.mean(nonreasoning_acts))
+        # Basic statistics using einops
+        mean_r = float(reduce(reasoning_acts, 'samples -> ', 'mean'))
+        mean_nr = float(reduce(nonreasoning_acts, 'samples -> ', 'mean'))
         std_r = float(np.std(reasoning_acts))
         std_nr = float(np.std(nonreasoning_acts))
         
@@ -265,9 +273,10 @@ class ReasoningFeatureDetector:
             roc_auc = 0.5
         
         # Activation frequency (threshold at 0.01 * max activation)
-        threshold = 0.01 * max(acts.max(), 1e-10)
-        freq_r = (reasoning_acts > threshold).mean()
-        freq_nr = (nonreasoning_acts > threshold).mean()
+        max_act = float(reduce(acts, 'samples -> ', 'max'))
+        threshold = 0.01 * max(max_act, 1e-10)
+        freq_r = float(reduce((reasoning_acts > threshold).astype(float), 'samples -> ', 'mean'))
+        freq_nr = float(reduce((nonreasoning_acts > threshold).astype(float), 'samples -> ', 'mean'))
         
         stats = FeatureStats(
             feature_index=feature_idx,
@@ -402,12 +411,15 @@ class ReasoningFeatureDetector:
         all_stats = self.compute_all_stats(feature_indices=feature_indices)
         reasoning_features = self.get_reasoning_features(feature_indices=feature_indices)
         
+        auc_values = np.array([s.roc_auc for s in reasoning_features]) if reasoning_features else np.array([])
+        cohens_d_values = np.array([s.cohens_d for s in reasoning_features]) if reasoning_features else np.array([])
+        
         return {
             "total_features": len(all_stats),
             "reasoning_features_count": len(reasoning_features),
             "percentage_reasoning": len(reasoning_features) / len(all_stats) * 100 if all_stats else 0,
             "top_10_features": [s.feature_index for s in reasoning_features[:10]],
             "top_10_scores": [s.reasoning_score for s in reasoning_features[:10]],
-            "mean_auc_reasoning_features": np.mean([s.roc_auc for s in reasoning_features]) if reasoning_features else 0,
-            "mean_cohens_d_reasoning_features": np.mean([s.cohens_d for s in reasoning_features]) if reasoning_features else 0,
+            "mean_auc_reasoning_features": float(reduce(auc_values, 'features -> ', 'mean')) if len(auc_values) > 0 else 0,
+            "mean_cohens_d_reasoning_features": float(reduce(cohens_d_values, 'features -> ', 'mean')) if len(cohens_d_values) > 0 else 0,
         }

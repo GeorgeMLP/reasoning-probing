@@ -35,10 +35,12 @@ import os
 import sys
 from pathlib import Path
 import time
+from typing import Literal
 
 import requests
 import torch
 import numpy as np
+from einops import reduce
 from dataclasses import dataclass, asdict
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -48,7 +50,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 class CounterExample:
     """A counterexample with its activation result."""
     text: str
-    category: str  # 'false_positive' or 'false_negative'
+    category: Literal["false_positive", "false_negative"]
     expected_reasoning: bool
     max_activation: float
     is_valid_counterexample: bool
@@ -168,7 +170,9 @@ class FeatureAnalyzer:
         top_indices = np.argsort(acts)[-5:][::-1]
         top_tokens = [(tokens[i], float(acts[i])) for i in top_indices if acts[i] > 0]
         
-        return float(acts.max()), float(acts.mean()), top_tokens
+        max_act = float(reduce(acts, 'seq -> ', 'max'))
+        mean_act = float(reduce(acts, 'seq -> ', 'mean'))
+        return max_act, mean_act, top_tokens
     
     def collect_activation_examples(
         self, 
@@ -246,7 +250,7 @@ Focus on what linguistic pattern causes activation, not just what the texts are 
         hypothesis: str,
         high_activation_examples: list[dict],
         top_tokens: list[str],
-        category: str,  # 'false_positive' or 'false_negative'
+        category: Literal["false_positive", "false_negative"],
         previous_attempts: list = None,  # Previous counterexample results
     ) -> list[str]:
         """Use LLM to generate counterexample candidates."""
@@ -341,7 +345,7 @@ Format: JSON array of 5 strings. Only output the JSON, nothing else."""
         self,
         feature_index: int,
         candidates: list[str],
-        category: str,
+        category: Literal["false_positive", "false_negative"],
         reference_max_activation: float,
         threshold_ratio: float = 0.5,
     ) -> list[CounterExample]:

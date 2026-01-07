@@ -73,10 +73,11 @@ import json
 import random
 from pathlib import Path
 import sys
-from typing import Optional
+from typing import Optional, Literal
 
 import numpy as np
 import torch
+from einops import reduce
 from jaxtyping import Float, Int
 from tqdm import tqdm
 from scipy import stats
@@ -280,7 +281,12 @@ def inject_tokens_into_text(
     text: str,
     tokens: list[str],
     n_inject: int = 3,
-    strategy: str = "prepend",
+    strategy: Literal[
+        "prepend", "append", "intersperse", "replace",
+        "inject_bigram", "inject_trigram",
+        "bigram_before", "bigram_after", "trigram",
+        "comma_list", "active_trigram"
+    ] = "prepend",
     token_contexts: Optional[dict[str, dict[str, list[str]]]] = None,
     ngrams: Optional[list[str]] = None,
 ) -> str:
@@ -620,23 +626,23 @@ def run_injection_experiment(
         model, sae, tokenizer, nonreasoning_texts, layer, feature_index, device,
         batch_size=batch_size, max_length=max_length
     )
-    baseline_mean = float(np.mean(baseline_acts))
+    baseline_mean = float(reduce(baseline_acts, 'samples -> ', 'mean'))
     baseline_std = float(np.std(baseline_acts))
     # Use relative threshold for nonzero: activation > 0.5 std above mean
     nonzero_threshold = max(baseline_std * 0.5, 0.01)
     
     results["baseline_mean"] = baseline_mean
     results["baseline_std"] = baseline_std
-    results["baseline_nonzero_frac"] = float(np.mean(baseline_acts > nonzero_threshold))
+    results["baseline_nonzero_frac"] = float(reduce((baseline_acts > nonzero_threshold).astype(float), 'samples -> ', 'mean'))
     
     # Target: activation on reasoning text
     reasoning_acts = get_feature_activation(
         model, sae, tokenizer, reasoning_texts, layer, feature_index, device,
         batch_size=batch_size, max_length=max_length
     )
-    results["reasoning_mean"] = float(np.mean(reasoning_acts))
+    results["reasoning_mean"] = float(reduce(reasoning_acts, 'samples -> ', 'mean'))
     results["reasoning_std"] = float(np.std(reasoning_acts))
-    results["reasoning_nonzero_frac"] = float(np.mean(reasoning_acts > nonzero_threshold))
+    results["reasoning_nonzero_frac"] = float(reduce((reasoning_acts > nonzero_threshold).astype(float), 'samples -> ', 'mean'))
     
     # Test each injection strategy
     strategy_results = {}
@@ -678,8 +684,10 @@ def run_injection_experiment(
             batch_size=batch_size, max_length=max_length
         )
         
-        # Compute metrics
-        activation_increase = np.mean(injected_acts) - np.mean(baseline_acts)
+        # Compute metrics using einops
+        injected_mean = float(reduce(injected_acts, 'samples -> ', 'mean'))
+        baseline_mean_local = float(reduce(baseline_acts, 'samples -> ', 'mean'))
+        activation_increase = injected_mean - baseline_mean_local
         baseline_std = results["baseline_std"]
         
         # Statistical test: is injection activation significantly higher than baseline?
@@ -699,9 +707,9 @@ def run_injection_experiment(
         nonzero_threshold = max(baseline_std * 0.5, 0.01)
         
         strategy_results[strategy] = {
-            "injected_mean": float(np.mean(injected_acts)),
+            "injected_mean": injected_mean,
             "injected_std": float(np.std(injected_acts)),
-            "injected_nonzero_frac": float(np.mean(injected_acts > nonzero_threshold)),
+            "injected_nonzero_frac": float(reduce((injected_acts > nonzero_threshold).astype(float), 'samples -> ', 'mean')),
             "activation_increase": float(activation_increase),
             "t_statistic": float(t_stat),
             "p_value": float(p_value),
@@ -1017,7 +1025,8 @@ def main():
         pct = 100 * count / len(classifications) if classifications else 0
         print(f"  {cls}: {count} ({pct:.1f}%)")
     
-    avg_cohens_d = np.mean([r["best_cohens_d"] for r in all_results])
+    cohens_d_values = np.array([r["best_cohens_d"] for r in all_results])
+    avg_cohens_d = float(reduce(cohens_d_values, 'features -> ', 'mean'))
     print(f"\n  Average best Cohen's d: {avg_cohens_d:.3f}")
     
     # Save results
@@ -1051,8 +1060,8 @@ def main():
                             "weakly_token_driven", "context_dependent"]
             },
             "avg_cohens_d": float(avg_cohens_d),
-            "avg_baseline_activation": float(np.mean([r["baseline_mean"] for r in all_results])),
-            "avg_reasoning_activation": float(np.mean([r["reasoning_mean"] for r in all_results])),
+            "avg_baseline_activation": float(reduce(np.array([r["baseline_mean"] for r in all_results]), 'features -> ', 'mean')),
+            "avg_reasoning_activation": float(reduce(np.array([r["reasoning_mean"] for r in all_results]), 'features -> ', 'mean')),
         },
         "features": all_results,
     }

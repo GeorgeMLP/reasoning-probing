@@ -6,6 +6,7 @@ from typing import Optional
 import torch
 from torch import Tensor
 from jaxtyping import Float, Int
+from einops import reduce
 import tqdm
 
 from sae_lens import SAE, HookedSAETransformer
@@ -80,11 +81,15 @@ class FeatureActivations:
     
     def get_max_activations(self) -> Float[Tensor, "samples features"]:
         """Get max activation per feature per sample (across sequence)."""
-        return self.activations.max(dim=1).values
+        return reduce(
+            self.activations, 'samples seq features -> samples features', 'max'
+        )
     
     def get_mean_activations(self) -> Float[Tensor, "samples features"]:
         """Get mean activation per feature per sample (across sequence)."""
-        return self.activations.mean(dim=1)
+        return reduce(
+            self.activations, 'samples seq features -> samples features', 'mean'
+        )
 
 
 class FeatureCollector:

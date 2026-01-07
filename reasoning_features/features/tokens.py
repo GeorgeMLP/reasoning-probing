@@ -9,6 +9,7 @@ deeper reasoning patterns.
 from dataclasses import dataclass
 from collections import defaultdict
 import numpy as np
+from einops import reduce
 from transformers import PreTrainedTokenizerBase
 
 from .collector import FeatureActivations
@@ -209,14 +210,14 @@ class TopTokenAnalyzer:
             
             token_acts = np.array(token_acts)
             
-            # Basic statistics
-            mean_act = float(np.mean(token_acts))
-            max_act = float(np.max(token_acts))
+            # Basic statistics using einops
+            mean_act = float(reduce(token_acts, 'positions -> ', 'mean'))
+            max_act = float(reduce(token_acts, 'positions -> ', 'max'))
             
             # PMI calculation
             p_token = len(positions) / self.total_tokens
             p_feature_fires = feature_fires_prob
-            p_joint = (token_acts > threshold).mean()
+            p_joint = float(reduce((token_acts > threshold).astype(float), 'positions -> ', 'mean'))
             
             # Avoid log(0)
             if p_joint > 0 and p_token > 0 and p_feature_fires > 0:
@@ -225,15 +226,19 @@ class TopTokenAnalyzer:
                 pmi = -np.inf
             
             # Activation ratio
-            p_feature_given_token = (token_acts > threshold).mean()
+            p_feature_given_token = float(reduce((token_acts > threshold).astype(float), 'positions -> ', 'mean'))
             if p_feature_fires > 0:
                 activation_ratio = p_feature_given_token / p_feature_fires
             else:
                 activation_ratio = 0.0
             
-            # Context-aware statistics
-            mean_reasoning = np.mean(token_acts_reasoning) if token_acts_reasoning else 0.0
-            mean_nonreasoning = np.mean(token_acts_nonreasoning) if token_acts_nonreasoning else 0.0
+            # Context-aware statistics using einops
+            mean_reasoning = float(reduce(
+                np.array(token_acts_reasoning), 'positions -> ', 'mean'
+            )) if token_acts_reasoning else 0.0
+            mean_nonreasoning = float(reduce(
+                np.array(token_acts_nonreasoning), 'positions -> ', 'mean'
+            )) if token_acts_nonreasoning else 0.0
             
             # Decode token
             try:
@@ -344,7 +349,7 @@ class TopTokenAnalyzer:
         total_act = sum(token_act_sums.values())
         if total_act > 0:
             probs = np.array([v / total_act for v in token_act_sums.values()])
-            entropy = -np.sum(probs * np.log2(probs + 1e-10))
+            entropy = -float(reduce(probs * np.log2(probs + 1e-10), 'tokens -> ', 'sum'))
             max_entropy = np.log2(len(token_act_sums))
             normalized_entropy = entropy / max(max_entropy, 1e-10)
         else:
@@ -399,8 +404,8 @@ class TopTokenAnalyzer:
             for pos in range(seq_len - n + 1):
                 ngram_ids = tuple(int(tokens[sample_idx, pos + i]) for i in range(n))
                 ngram_acts = acts[sample_idx, pos:pos + n]
-                mean_act = float(np.mean(ngram_acts))
-                max_act = float(np.max(ngram_acts))
+                mean_act = float(reduce(ngram_acts, 'n -> ', 'mean'))
+                max_act = float(reduce(ngram_acts, 'n -> ', 'max'))
                 
                 stats = ngram_stats[ngram_ids]
                 stats['mean_acts'].append(mean_act)
@@ -425,19 +430,24 @@ class TopTokenAnalyzer:
                 token_strs = tuple(f"<token_{tid}>" for tid in ngram_ids)
                 ngram_str = ' '.join(token_strs)
             
+            mean_acts_arr = np.array(stats['mean_acts'])
+            max_acts_arr = np.array(stats['max_acts'])
+            reasoning_acts_arr = np.array(stats['reasoning_acts']) if stats['reasoning_acts'] else np.array([])
+            nonreasoning_acts_arr = np.array(stats['nonreasoning_acts']) if stats['nonreasoning_acts'] else np.array([])
+            
             associations.append(NgramFeatureAssociation(
                 token_ids=ngram_ids,
                 token_strs=token_strs,
                 ngram_str=ngram_str,
                 feature_index=feature_index,
                 n=n,
-                mean_activation=float(np.mean(stats['mean_acts'])),
-                max_activation=float(np.max(stats['max_acts'])),
+                mean_activation=float(reduce(mean_acts_arr, 'occurrences -> ', 'mean')),
+                max_activation=float(reduce(max_acts_arr, 'occurrences -> ', 'max')),
                 occurrence_count=len(stats['mean_acts']),
                 occurrence_count_reasoning=len(stats['reasoning_acts']),
                 occurrence_count_nonreasoning=len(stats['nonreasoning_acts']),
-                mean_activation_in_reasoning=float(np.mean(stats['reasoning_acts'])) if stats['reasoning_acts'] else 0.0,
-                mean_activation_in_nonreasoning=float(np.mean(stats['nonreasoning_acts'])) if stats['nonreasoning_acts'] else 0.0,
+                mean_activation_in_reasoning=float(reduce(reasoning_acts_arr, 'occurrences -> ', 'mean')) if len(reasoning_acts_arr) > 0 else 0.0,
+                mean_activation_in_nonreasoning=float(reduce(nonreasoning_acts_arr, 'occurrences -> ', 'mean')) if len(nonreasoning_acts_arr) > 0 else 0.0,
             ))
         
         # Sort by mean activation (descending)
