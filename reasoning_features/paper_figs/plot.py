@@ -416,11 +416,11 @@ if all_data:
     width = 0.8
     
     # Stacked bars
-    p1 = ax.bar(x, td, width, label='Token-driven', color='#d62728', alpha=0.9)
-    p2 = ax.bar(x, ptd, width, bottom=td, label='Partially TD', color='#ff7f0e', alpha=0.9)
-    p3 = ax.bar(x, wtd, width, bottom=np.array(td)+np.array(ptd), 
+    ax.bar(x, td, width, label='Token-driven', color='#d62728', alpha=0.9)
+    ax.bar(x, ptd, width, bottom=td, label='Partially TD', color='#ff7f0e', alpha=0.9)
+    ax.bar(x, wtd, width, bottom=np.array(td)+np.array(ptd), 
                 label='Weakly TD', color='#ffbb78', alpha=0.9)
-    p4 = ax.bar(x, cd, width, bottom=np.array(td)+np.array(ptd)+np.array(wtd), 
+    ax.bar(x, cd, width, bottom=np.array(td)+np.array(ptd)+np.array(wtd), 
                 label='Context-dependent', color='#1f77b4', alpha=0.9)
     
     ax.set_ylabel(r'Percentage of Features (\%)')

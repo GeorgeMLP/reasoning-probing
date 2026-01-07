@@ -156,7 +156,6 @@ class TopTokenAnalyzer:
                 self.token_positions[token_id].append((sample_idx, pos))
         
         self.total_tokens = tokens.size
-        self.unique_tokens = len(self.token_counts)
     
     def get_top_tokens_for_feature(
         self,
@@ -265,41 +264,6 @@ class TopTokenAnalyzer:
         associations.sort(key=lambda x: x.mean_activation, reverse=True)
         
         return associations[:top_k]
-    
-    def get_reasoning_specific_tokens(
-        self,
-        feature_index: int,
-        top_k: int = 30,
-        min_occurrences: int = 5,
-    ) -> list[TokenFeatureAssociation]:
-        """
-        Get tokens that activate the feature specifically in reasoning contexts.
-        
-        These are tokens where mean_activation_in_reasoning >> mean_activation_in_nonreasoning.
-        """
-        all_tokens = self.get_top_tokens_for_feature(
-            feature_index, top_k=top_k * 3, min_occurrences=min_occurrences
-        )
-        
-        # Filter and sort by reasoning specificity
-        reasoning_tokens = []
-        for assoc in all_tokens:
-            # Require at least some activation in reasoning
-            if assoc.mean_activation_in_reasoning < 0.01:
-                continue
-            
-            # Compute reasoning specificity ratio
-            specificity = assoc.mean_activation_in_reasoning / (
-                assoc.mean_activation_in_nonreasoning + 1e-10
-            )
-            
-            if specificity > 1.5:  # At least 1.5x more active in reasoning
-                reasoning_tokens.append((assoc, specificity))
-        
-        # Sort by specificity
-        reasoning_tokens.sort(key=lambda x: x[1], reverse=True)
-        
-        return [assoc for assoc, _ in reasoning_tokens[:top_k]]
     
     def analyze_feature_token_dependency(
         self,
@@ -453,35 +417,3 @@ class TopTokenAnalyzer:
         # Sort by mean activation (descending)
         associations.sort(key=lambda x: x.mean_activation, reverse=True)
         return associations[:top_k]
-    
-    def get_feature_vocabulary(
-        self,
-        feature_index: int,
-        activation_percentile: float = 90,
-    ) -> list[str]:
-        """
-        Get the vocabulary of tokens that trigger high activations for a feature.
-        
-        Returns unique tokens that appear in positions with activations
-        above the given percentile.
-        """
-        acts = self.activations.activations[:, :, feature_index].numpy()
-        tokens = self.activations.tokens.numpy()
-        
-        threshold = np.percentile(acts[acts > 0], activation_percentile) if (acts > 0).any() else 0
-        
-        high_act_tokens = set()
-        for sample_idx in range(acts.shape[0]):
-            for pos in range(acts.shape[1]):
-                if acts[sample_idx, pos] > threshold:
-                    high_act_tokens.add(tokens[sample_idx, pos])
-        
-        # Decode tokens
-        vocab = []
-        for token_id in high_act_tokens:
-            try:
-                vocab.append(self.tokenizer.decode([token_id]))
-            except Exception:
-                pass
-        
-        return vocab

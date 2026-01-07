@@ -115,9 +115,6 @@ def get_token_sequences_from_reasoning_texts(
     """
     from collections import Counter
     
-    # Normalize target tokens for matching
-    target_set = {t.strip().lower() for t in target_tokens}
-    
     # Count contexts
     token_contexts = {token: {"before": Counter(), "after": Counter()} for token in target_tokens}
     

@@ -88,7 +88,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 def extract_token_contexts(
     reasoning_texts: list[str],
     target_tokens: list[str],
-    context_window: int = 2,
 ) -> dict[str, dict[str, list[str]]]:
     """Extract common contexts (preceding/following tokens) for target tokens.
     
@@ -306,16 +305,17 @@ def inject_tokens_into_text(
         - append: Add tokens at the end
         - intersperse: Spread tokens throughout
         - replace: Replace random words
+        - comma_list: Inject as comma-separated list
         
     N-gram injection strategies (use n_inject_bigram/n_inject_trigram):
         - inject_bigram: Inject top bigrams from analysis
         - inject_trigram: Inject top trigrams from analysis
+        - active_trigram: Inject consecutive token sequences from reasoning texts that all activate the feature
         
     Contextual strategies:
         - bigram_before: Inject [context_word, target_token] pairs
         - bigram_after: Inject [target_token, context_word] pairs
         - trigram: Inject [before, target_token, after] triplets
-        - comma_list: Inject as comma-separated list
         
     Returns:
         Modified text with tokens injected
@@ -648,13 +648,11 @@ def run_injection_experiment(
     strategy_results = {}
     
     # Define strategy categories
-    simple_strategies = {"prepend", "append", "intersperse", "replace"}
+    simple_strategies = {"prepend", "append", "intersperse", "replace", "comma_list"}
     ngram_bigram_strategies = {"inject_bigram", "bigram_before", "bigram_after"}
-    ngram_trigram_strategies = {"inject_trigram", "trigram", "active_trigram"}
-    # comma_list uses n_inject since a list needs multiple items
     
     def get_n_inject_for_strategy(strat: str) -> int:
-        if strat in simple_strategies or strat == "comma_list":
+        if strat in simple_strategies:
             return n_inject
         elif strat in ngram_bigram_strategies:
             return n_inject_bigram
@@ -915,7 +913,6 @@ def main():
         global_token_contexts = extract_token_contexts(
             reasoning_texts[:min(1000, len(reasoning_texts))],  # Use up to 1000 texts for context extraction
             all_feature_tokens,
-            context_window=2
         )
         print(f"  Extracted contexts for {len(global_token_contexts)} unique tokens")
     else:

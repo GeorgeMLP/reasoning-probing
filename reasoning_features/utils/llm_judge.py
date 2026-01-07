@@ -136,39 +136,6 @@ Do not provide any explanation."""
         
         response = self._call_api(prompt)
         return response.upper().startswith("YES")
-    
-    def batch_check(
-        self,
-        predictions: list[str],
-        expected: list[str],
-        verbose: bool = False,
-    ) -> list[bool]:
-        """
-        Check equivalence for multiple prediction-expected pairs.
-        
-        Args:
-            predictions: List of predicted answers
-            expected: List of expected answers
-            verbose: Print progress
-        
-        Returns:
-            List of boolean results
-        """
-        results = []
-        
-        for i, (pred, exp) in enumerate(zip(predictions, expected)):
-            if verbose and i % 10 == 0:
-                print(f"Checking {i+1}/{len(predictions)}...")
-            
-            try:
-                result = self.check_equivalence(pred, exp)
-            except Exception as e:
-                print(f"Warning: Judge failed for item {i}: {e}")
-                result = False  # Default to incorrect on failure
-            
-            results.append(result)
-        
-        return results
 
 
 # Global judge instance (lazy initialization)

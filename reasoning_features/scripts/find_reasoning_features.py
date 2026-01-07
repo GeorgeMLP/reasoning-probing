@@ -330,7 +330,7 @@ def main():
     detector = ReasoningFeatureDetector(
         activations, 
         aggregation="max",
-        score_weights=score_weights
+        score_weights=score_weights,
     )
     
     # Get all feature statistics (or subset if feature_indices specified)

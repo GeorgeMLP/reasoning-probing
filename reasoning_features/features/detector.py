@@ -94,22 +94,6 @@ class FeatureStats:
             weights["freq"] * freq_contrib
         )
     
-    def set_score_weights(
-        self,
-        auc_weight: float = 0.3,
-        effect_weight: float = 0.25,
-        pvalue_weight: float = 0.25,
-        freq_weight: float = 0.2,
-    ):
-        """Update score weights and recompute reasoning score."""
-        self._score_weights = {
-            "auc": auc_weight,
-            "effect": effect_weight,
-            "pvalue": pvalue_weight,
-            "freq": freq_weight,
-        }
-        self._compute_reasoning_score()
-    
     def is_reasoning_feature(
         self,
         min_auc: float = 0.6,
