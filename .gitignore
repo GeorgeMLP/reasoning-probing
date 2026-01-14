@@ -4,6 +4,7 @@ __pycache__/
 .cursor/
 wandb/
 data/
+docs/
 cache/
 figs/
 plots/

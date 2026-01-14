@@ -19,6 +19,7 @@ setup(
         "sae_lens",
         "transformer_lens",
         "matplotlib",
+        "json-repair",
     ],
     url="",
     description="",

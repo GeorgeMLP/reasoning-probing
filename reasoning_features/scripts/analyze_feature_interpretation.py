@@ -31,6 +31,7 @@ Usage:
 
 import argparse
 import json
+import json_repair
 import os
 import sys
 from pathlib import Path
@@ -210,7 +211,7 @@ class FeatureAnalyzer:
             f"Example {i+1} (max activation: {ex['max_activation']:.1f}):\n"
             f"Text: {ex['text'][:400]}...\n"
             f"Tokens with highest activation: {format_tokens_with_activations(ex.get('top_tokens', [])[:7])}"
-            for i, ex in enumerate(high_activation_examples[:5])
+            for i, ex in enumerate(high_activation_examples[:10])
         ])
         
         prompt = f"""You are analyzing a neural network feature (from a Sparse Autoencoder) to understand what linguistic pattern it detects.
@@ -280,10 +281,17 @@ Focus on what linguistic pattern causes activation, not just what the texts are 
 
 Strategy: Based on the hypothesis and top tokens, create non-reasoning content (recipes, product reviews, sports commentary, news, fiction, etc.) that contains the linguistic patterns this feature detects.
 
-Key insight: The feature activates on tokens like: {', '.join(top_tokens[:10])}
-Try to naturally incorporate these patterns into non-reasoning contexts.
+CRITICAL CONSTRAINT:
+The outputs must NOT contain ANY reasoning, thinking, deliberation, explanation, or problem-solving.
 
-Each example should be 50-100 words."""
+This includes (but is not limited to):
+- Step-by-step structure
+- Math, logic, proofs, calculations, puzzles, or hypothetical reasoning
+
+Key insight: The feature activates on tokens like: {', '.join(top_tokens[:10])}
+Try to use these patterns in non-reasoning contexts.
+
+Each example should be 50-100 words. Generate 5 examples in the format of a JSON list of 5 strings with the correct syntax. Do not include any text (e.g. comments, explanations, etc.) other than the list. Note that backslash and double quotes need to be escaped. Only output the list, nothing else."""
         else:
             goal = "Find REASONING text that does NOT activate this feature"
             task = f"""Generate 5 text examples that:
@@ -300,11 +308,12 @@ Ideas: casual problem-solving, stream-of-consciousness thinking, simple logical 
 Each example should be 50-100 words."""
         
         # Build examples text with activating tokens
+        num_examples = 10 if category == "false_positive" else 3
         examples_text = "\n\n".join([
             f"Example {i+1} (max activation: {ex['max_activation']:.1f}):\n"
             f"Text: {ex['text'][:350]}...\n"
             f"Activating tokens: {format_tokens_with_activations(ex.get('top_tokens', [])[:7])}"
-            for i, ex in enumerate(high_activation_examples[:3])
+            for i, ex in enumerate(high_activation_examples[:num_examples])
         ])
         
         prompt = f"""## Goal: {goal}
@@ -335,10 +344,11 @@ Format: JSON array of 5 strings. Only output the JSON, nothing else."""
                 response = response.split("```")[1]
                 if response.startswith("json"):
                     response = response[4:]
-            examples = json.loads(response)
+            examples = json_repair.loads(response)
             return examples[:5]
         except json.JSONDecodeError:
             print(f"Warning: Could not parse LLM response as JSON")
+            print(response)
             return []
     
     def test_counterexamples(
@@ -478,7 +488,7 @@ Format as JSON:
                 response = response.split("```")[1]
                 if response.startswith("json"):
                     response = response[4:]
-            result = json.loads(response)
+            result = json_repair.loads(response)
         except json.JSONDecodeError:
             result = {
                 "refined_interpretation": initial_hypothesis,
