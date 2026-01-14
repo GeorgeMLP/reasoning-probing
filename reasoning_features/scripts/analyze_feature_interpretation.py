@@ -524,9 +524,9 @@ Format as JSON:
         threshold_ratio: float = 0.5,
     ) -> FeatureInterpretation:
         """Complete analysis of a single feature."""
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Analyzing Feature {feature_index}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         
         # Step 1: Collect high-activation examples
         print("Step 1: Collecting high-activation examples...")
@@ -626,9 +626,9 @@ Format as JSON:
             feature_index, hypothesis, all_counterexamples, examples, top_tokens, iterations_used
         )
         
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"RESULT for Feature {feature_index}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Interpretation: {interpretation.refined_interpretation}")
         print(f"Is genuine reasoning feature: {interpretation.is_genuine_reasoning_feature}")
         print(f"Confidence: {interpretation.confidence}")

@@ -314,7 +314,7 @@ if concentration_data:
     fig, ax = plt.subplots(figsize=(6, 3.5))
     
     parts = ax.violinplot(concentration_data, positions=range(len(concentration_data)),
-                          showmeans=False, showmedians=True, widths=0.7)
+                          showmeans=True, showmedians=False, widths=0.7)
     
     # Color the violins
     for pc in parts['bodies']:
