@@ -1,6 +1,6 @@
 # Do Sparse Autoencoders Identify Reasoning Features in Language Models?
 
-This repository contains the code and experimental framework for our paper investigating whether Sparse Autoencoders (SAEs) capture genuine reasoning features in language models, or merely learn spurious correlations with reasoning-associated tokens.
+This repository contains the code and experimental framework for our paper, [*Do Sparse Autoencoders Identify Reasoning Features in Language Models?*](https://arxiv.org/abs/2601.05679), which investigates whether Sparse Autoencoders (SAEs) capture genuine reasoning features in language models, or merely learn spurious correlations with reasoning-associated tokens.
 
 ## Overview
 
