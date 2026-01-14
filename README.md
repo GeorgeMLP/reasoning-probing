@@ -145,14 +145,6 @@ results/{metric}/{model}/{dataset}/layer{N}/
 - **Non-Reasoning**: Pile (Uncopyrighted)
 - **Benchmarks**: AIME 2024, GPQA Diamond
 
-## Key Experimental Results
-
-Across all experiments:
-- **1,753 features** detected via statistical testing
-- **271 features** analyzed with LLM-guided interpretation
-- **0 genuine reasoning features** identified
-- **59-94%** of features are token-driven (activate from simple token injection)
-
 ## Hardware Requirements
 
 All experiments were conducted on a single NVIDIA A100 80GB GPU.
@@ -165,6 +157,7 @@ If you use this code or findings in your research, please cite:
 @article{ma2026sparse,
     title={{Do Sparse Autoencoders Identify Reasoning Features in Language Models?}},
     author={Ma, George and Liang, Zhongyuan and Chen, Irene Y. and Sojoudi, Somayeh},
+    journal={arXiv preprint arXiv:2601.05679},
     year={2026}
 }
 ```
