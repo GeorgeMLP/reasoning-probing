@@ -3,7 +3,6 @@
 from .collector import FeatureCollector, FeatureActivations
 from .detector import ReasoningFeatureDetector, FeatureStats
 from .tokens import TopTokenAnalyzer, TokenFeatureAssociation, NgramFeatureAssociation
-from .selection import FeatureSelector, FeatureSelectionCriteria, SelectedFeature, load_and_select_features
 
 
 __all__ = [
@@ -14,9 +13,4 @@ __all__ = [
     "TopTokenAnalyzer",
     "TokenFeatureAssociation",
     "NgramFeatureAssociation",
-    "FeatureSelector",
-    "FeatureSelectionCriteria",
-    "SelectedFeature",
-    "load_and_select_features",
 ]
-
