@@ -293,22 +293,37 @@ Try to use these patterns in non-reasoning contexts.
 
 Each example should be 50-100 words. Generate 5 examples in the format of a JSON list of 5 strings with the correct syntax. Do not include any text (e.g. comments, explanations, etc.) other than the list. Note that backslash and double quotes need to be escaped. Only output the list, nothing else."""
         else:
-            goal = "Find REASONING text that does NOT activate this feature"
-            task = f"""Generate 5 text examples that:
-1. ARE clearly reasoning/thinking/problem-solving/deliberation
-2. But will NOT activate this feature (achieve LOW or zero activation)
+            goal = "Test SEMANTIC INVARIANCE: Paraphrase reasoning text to avoid activation"
+            task = f"""Generate 5 paraphrased versions of the high-activation examples above.
 
-Strategy: Based on the hypothesis and top tokens, create genuine reasoning content that AVOIDS the linguistic patterns this feature detects.
+CRITICAL REQUIREMENTS:
+1. Preserve the EXACT SAME semantic meaning, reasoning logic, and conclusions
+2. Use DIFFERENT linguistic expression to avoid activating this feature
+3. Sound NATURAL and FLUENT - paraphrases should read like native speaker writing
 
-Key insight: The feature activates on tokens like: {', '.join(top_tokens[:10])}
-Create reasoning that uses different vocabulary, simpler structure, or informal style.
+Strategy for natural semantic-preserving paraphrases:
+- Use synonyms and alternative phrasings while maintaining naturalness
+  Example: "therefore" → "so" / "that's why", "consider" → "think about" / "look at"
+- Change formality level smoothly
+  Example: formal academic → casual conversational, technical → plain English
+- Restructure sentences naturally (don't force awkward constructions)
+  Example: "Let us begin by examining..." → "First, let's look at..." / "To start, we need to check..."
+- Vary sentence structure and word order naturally
+- Critically: AVOID these tokens/patterns that activate the feature: {', '.join(top_tokens[:10])}
 
-Ideas: casual problem-solving, stream-of-consciousness thinking, simple logical deduction, everyday decisions, troubleshooting without formal language.
+IMPORTANT: You are REWRITING the examples above to express the same reasoning in different natural words. The paraphrases should sound like a different person wrote them, but making the exact same logical points.
 
-Each example should be 50-100 words."""
+Examples of good paraphrases:
+- Original: "Let me start by examining the key assumptions in this argument and determining their validity."
+- Good paraphrase: "First, I need to look at what assumptions this argument makes and see if they're actually valid."
+- Bad paraphrase: "Examination begins with key assumptions of this argument plus their validity determination."
+(First is natural, second is awkward/forced)
+
+Generate 5 natural, fluent paraphrases, each 50-100 words. Output as JSON list of 5 strings with correct syntax. Escape backslashes and quotes. Only output the list, nothing else."""
         
         # Build examples text with activating tokens
-        num_examples = 10 if category == "false_positive" else 3
+        # For false negatives (paraphrasing), show more examples so LLM can understand the pattern
+        num_examples = 10 if category == "false_positive" else 7
         examples_text = "\n\n".join([
             f"Example {i+1} (max activation: {ex['max_activation']:.1f}):\n"
             f"Text: {ex['text'][:350]}...\n"
