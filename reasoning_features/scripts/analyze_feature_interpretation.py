@@ -72,6 +72,7 @@ class FeatureInterpretation:
     is_genuine_reasoning_feature: bool
     summary: str
     iterations_used: int
+    high_activation_examples: list[dict]  # For visualization consistency
 
 
 class LLMClient:
@@ -180,19 +181,62 @@ class FeatureAnalyzer:
         feature_index: int,
         reasoning_texts: list[str],
         n_examples: int = 10,
+        n_tokens_visualize: int = 40,
     ) -> list[dict]:
-        """Collect examples of high activation with context."""
+        """Collect examples of high activation with full token-level information for visualization."""
         examples = []
         
         for text in reasoning_texts[:500]:
-            max_act, mean_act, top_tokens = self.get_activation(text, feature_index)
+            # Get full activation data
+            inputs = self.tokenizer(
+                text, return_tensors="pt", truncation=True, max_length=128
+            ).to(self.device)
+            
+            with torch.no_grad():
+                _, cache = self.model.run_with_cache(
+                    inputs["input_ids"],
+                    names_filter=[f"blocks.{self.layer}.hook_resid_post"],
+                )
+                hidden = cache[f"blocks.{self.layer}.hook_resid_post"]
+                sae_acts = self.sae.encode(hidden)
+                acts = sae_acts[0, :, feature_index].cpu().numpy()
+            
+            token_ids = inputs["input_ids"][0].tolist()
+            tokens = [self.tokenizer.decode([tid]) for tid in token_ids]
+            
+            max_act = float(acts.max())
             
             if max_act > 5:
+                # Find window with highest mean activation for visualization
+                if len(acts) > n_tokens_visualize:
+                    window_means = []
+                    for i in range(len(acts) - n_tokens_visualize + 1):
+                        window_mean = np.mean(acts[i:i + n_tokens_visualize])
+                        window_means.append(window_mean)
+                    
+                    max_mean = np.max(window_means)
+                    argwhere = np.argwhere(np.isclose(window_means, max_mean))
+                    best_start = int(argwhere[len(argwhere) // 2].item())
+                    best_end = best_start + n_tokens_visualize
+                    
+                    window_tokens = tokens[best_start:best_end]
+                    window_acts = acts[best_start:best_end].tolist()
+                else:
+                    window_tokens = tokens
+                    window_acts = acts.tolist()
+                
+                # Get top activating tokens (for LLM display)
+                top_indices = np.argsort(acts)[-5:][::-1]
+                top_tokens = [(tokens[i], float(acts[i])) for i in top_indices if acts[i] > 0]
+                
                 examples.append({
                     "text": text[:500],
                     "max_activation": max_act,
-                    "mean_activation": mean_act,
+                    "mean_activation": float(np.mean(acts)),
                     "top_tokens": top_tokens[:10],
+                    # For visualization
+                    "visualization_tokens": window_tokens,
+                    "visualization_activations": window_acts,
                 })
         
         # Sort by activation and return top N
@@ -306,18 +350,10 @@ Strategy for natural semantic-preserving paraphrases:
   Example: "therefore" → "so" / "that's why", "consider" → "think about" / "look at"
 - Change formality level smoothly
   Example: formal academic → casual conversational, technical → plain English
-- Restructure sentences naturally (don't force awkward constructions)
+- Restructure sentences naturally
   Example: "Let us begin by examining..." → "First, let's look at..." / "To start, we need to check..."
 - Vary sentence structure and word order naturally
 - Critically: AVOID these tokens/patterns that activate the feature: {', '.join(top_tokens[:10])}
-
-IMPORTANT: You are REWRITING the examples above to express the same reasoning in different natural words. The paraphrases should sound like a different person wrote them, but making the exact same logical points.
-
-Examples of good paraphrases:
-- Original: "Let me start by examining the key assumptions in this argument and determining their validity."
-- Good paraphrase: "First, I need to look at what assumptions this argument makes and see if they're actually valid."
-- Bad paraphrase: "Examination begins with key assumptions of this argument plus their validity determination."
-(First is natural, second is awkward/forced)
 
 Generate 5 natural, fluent paraphrases, each 50-100 words. Output as JSON list of 5 strings with correct syntax. Escape backslashes and quotes. Only output the list, nothing else."""
         
@@ -526,6 +562,7 @@ Format as JSON:
             is_genuine_reasoning_feature=result.get("is_genuine_reasoning_feature", False),
             summary=result.get("summary", ""),
             iterations_used=iterations_used,
+            high_activation_examples=high_activation_examples,
         )
     
     def analyze_feature(
@@ -561,6 +598,7 @@ Format as JSON:
                 is_genuine_reasoning_feature=False,
                 summary="Feature does not activate on the reasoning dataset",
                 iterations_used=0,
+                high_activation_examples=[],
             )
         
         # Compute reference max activation from collected examples
