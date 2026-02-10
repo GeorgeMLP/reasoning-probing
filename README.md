@@ -1,6 +1,6 @@
-# Do Sparse Autoencoders Identify Reasoning Features in Language Models?
+# Falsifying Sparse Autoencoder Reasoning Features in Language Models
 
-This repository contains the code and experimental framework for our paper, [*Do Sparse Autoencoders Identify Reasoning Features in Language Models?*](https://arxiv.org/abs/2601.05679), which investigates whether Sparse Autoencoders (SAEs) capture genuine reasoning features in language models, or merely learn spurious correlations with reasoning-associated tokens.
+This repository contains the code and experimental framework for our paper, [*Falsifying Sparse Autoencoder Reasoning Features in Language Models*](https://arxiv.org/abs/2601.05679), which investigates whether Sparse Autoencoders (SAEs) capture genuine reasoning features in language models, or merely learn spurious correlations with reasoning-associated tokens.
 
 ## Overview
 
@@ -11,7 +11,7 @@ We investigate SAE features that show differential activation on reasoning vs. n
 3. **LLM-Guided Interpretation**: Use LLM-based hypothesis testing to identify linguistic confounds
 4. **Steering Experiments**: Evaluate whether amplifying features improves reasoning performance
 
-**Main Finding**: Across 20 configurations on multiple models, layers and datasets, we find zero genuine reasoning features. All features are identified as confounds that respond to shallow linguistic patterns (conversational markers, formal discourse, syntactic complexity) rather than reasoning processes.
+**Main Finding**: Across 22 configurations on multiple models, layers and datasets, we find zero genuine reasoning features. All features are identified as confounds that respond to shallow linguistic patterns (conversational markers, formal discourse, syntactic complexity) rather than reasoning processes.
 
 ## Repository Structure
 
@@ -137,6 +137,7 @@ results/{metric}/{model}/{dataset}/layer{N}/
 - Gemma-3-12B-Instruct (layers 17, 22, 27)
 - Gemma-3-4B-Instruct (layers 17, 22, 27)
 - DeepSeek-R1-Distill-Llama-8B (layer 19)
+- Llama-3.1-8B (layer 16, appendix)
 - Gemma-2-9B (layer 21, appendix)
 - Gemma-2-2B (layer 13, appendix)
 
@@ -154,8 +155,8 @@ All experiments were conducted on a single NVIDIA A100 80GB GPU.
 If you use this code or findings in your research, please cite:
 
 ```bibtex
-@article{ma2026sparse,
-    title={{Do Sparse Autoencoders Identify Reasoning Features in Language Models?}},
+@article{ma2026falsifying,
+    title={{Falsifying Sparse Autoencoder Reasoning Features in Language Models}},
     author={Ma, George and Liang, Zhongyuan and Chen, Irene Y. and Sojoudi, Somayeh},
     journal={arXiv preprint arXiv:2601.05679},
     year={2026}
