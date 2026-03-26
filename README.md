@@ -2,6 +2,8 @@
 
 This repository contains the code and experimental framework for our paper, [*Falsifying Sparse Autoencoder Reasoning Features in Language Models*](https://arxiv.org/abs/2601.05679), which investigates whether Sparse Autoencoders (SAEs) capture genuine reasoning features in language models, or merely learn spurious correlations with reasoning-associated tokens.
 
+A related repository studying the geometry of reasoning manifolds in language models is available at https://github.com/GeorgeMLP/reasoning-dimension.
+
 ## Overview
 
 We investigate SAE features that show differential activation on reasoning vs. non-reasoning text through a multi-stage experimental pipeline:
