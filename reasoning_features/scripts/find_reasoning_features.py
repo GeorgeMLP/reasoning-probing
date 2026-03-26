@@ -44,6 +44,8 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import numpy as np
+from einops import reduce
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -53,6 +55,15 @@ from reasoning_features.features import (
     FeatureCollector,
     ReasoningFeatureDetector,
     TopTokenAnalyzer,
+    build_feature_runtime,
+)
+from reasoning_features.features.transcoder_search import (
+    analyze_selected_tokens,
+    build_token_analysis_summary,
+    collect_selected_feature_data,
+    compute_exact_feature_stats,
+    select_reasoning_features,
+    stream_rank_features_by_cohens_d,
 )
 
 
@@ -70,6 +81,12 @@ def parse_args():
         help="HuggingFace model name (default: google/gemma-3-4b-it)",
     )
     parser.add_argument(
+        "--feature-backend",
+        choices=["sae", "clt", "plt"],
+        default="sae",
+        help="Feature backend to analyze (default: sae)",
+    )
+    parser.add_argument(
         "--sae-name",
         default="gemma-scope-2-4b-it-res-all",
         help="SAE release name (default: gemma-scope-2-4b-it-res-all)",
@@ -84,6 +101,11 @@ def parse_args():
         type=int,
         default=8,
         help="Layer index to analyze (default: 8)",
+    )
+    parser.add_argument(
+        "--transcoder-set",
+        default=None,
+        help="circuit-tracer transcoder set for CLT/PLT backends",
     )
     
     # Dataset configuration
@@ -255,6 +277,187 @@ def parse_args():
     return parser.parse_args()
 
 
+def get_default_transcoder_set(feature_backend: str) -> str:
+    if feature_backend == "clt":
+        return "mntss/clt-gemma-2-2b-426k"
+    if feature_backend == "plt":
+        return "mntss/gemma-scope-transcoders"
+    raise ValueError(f"No default transcoder set for backend {feature_backend}")
+
+
+def run_transcoder_feature_search(args):
+    transcoder_set = args.transcoder_set or get_default_transcoder_set(args.feature_backend)
+    score_weights = {
+        "auc": args.score_weight_auc,
+        "effect": args.score_weight_effect,
+        "pvalue": args.score_weight_pvalue,
+        "freq": args.score_weight_freq,
+    }
+
+    runtime = build_feature_runtime(
+        feature_backend=args.feature_backend,
+        model_name=args.model_name,
+        device=args.device,
+        sae_name=args.sae_name,
+        sae_id_format=args.sae_id_format,
+        transcoder_set=transcoder_set,
+    )
+
+    reasoning_data = get_reasoning_dataset(
+        args.reasoning_dataset,
+        max_samples=args.reasoning_samples,
+    )
+    nonreasoning_data = PileDataset(max_samples=args.nonreasoning_samples)
+    reasoning_data.load()
+    nonreasoning_data.load()
+
+    all_texts = [sample.text for sample in reasoning_data] + [sample.text for sample in nonreasoning_data]
+    is_reasoning = [True] * len(reasoning_data) + [False] * len(nonreasoning_data)
+    sources = [sample.source for sample in reasoning_data] + [sample.source for sample in nonreasoning_data]
+
+    total_feature_count = runtime.get_num_features(args.layer)
+    if args.feature_indices:
+        selected_feature_indices = args.feature_indices[: args.top_k_features]
+        print(f"\nUsing {len(selected_feature_indices)} explicitly requested features")
+    else:
+        ranking = stream_rank_features_by_cohens_d(
+            runtime=runtime,
+            texts=all_texts,
+            is_reasoning=is_reasoning,
+            layer_index=args.layer,
+            max_length=args.max_length,
+            batch_size=args.batch_size,
+            max_features=args.max_features,
+        )
+        ranked_indices = np.argsort(ranking["cohens_d"])[::-1]
+        selected_feature_indices = [int(idx) for idx in ranked_indices[: args.top_k_features]]
+        total_feature_count = int(ranking["n_features"])
+
+        top_preview = selected_feature_indices[:10]
+        print(f"\nTop features by Cohen's d: {top_preview}")
+
+    print("\n--- Collecting Selected Feature Activations ---")
+    sample_maxes, feature_activations = collect_selected_feature_data(
+        runtime=runtime,
+        texts=all_texts,
+        is_reasoning=is_reasoning,
+        sources=sources,
+        layer_index=args.layer,
+        max_length=args.max_length,
+        batch_size=args.batch_size,
+        selected_feature_indices=selected_feature_indices,
+    )
+
+    exact_stats = compute_exact_feature_stats(
+        sample_maxes=sample_maxes,
+        is_reasoning=is_reasoning,
+        selected_feature_indices=selected_feature_indices,
+        score_weights=score_weights,
+    )
+    reasoning_features = select_reasoning_features(
+        exact_stats,
+        no_filter=args.no_filter,
+        top_k_features=args.top_k_features,
+        min_auc=args.min_auc,
+        max_pvalue=args.max_pvalue,
+        min_effect_size=args.min_effect_size,
+    )
+
+    features_for_token_analysis = reasoning_features if reasoning_features else exact_stats[: args.top_k_features]
+    feature_token_analyses = analyze_selected_tokens(
+        feature_activations=feature_activations,
+        tokenizer=runtime.tokenizer,
+        stats=features_for_token_analysis,
+        top_k_tokens=args.top_k_tokens,
+        min_token_occurrences=args.min_token_occurrences,
+        top_k_bigrams=args.top_k_bigrams,
+        min_bigram_occurrences=args.min_bigram_occurrences,
+        top_k_trigrams=args.top_k_trigrams,
+        min_trigram_occurrences=args.min_trigram_occurrences,
+    )
+
+    summary = {
+        "total_features": total_feature_count,
+        "reasoning_features_count": len(reasoning_features),
+        "percentage_reasoning": len(reasoning_features) / total_feature_count * 100 if total_feature_count else 0,
+        "top_10_features": [stat.feature_index for stat in reasoning_features[:10]],
+        "top_10_scores": [stat.reasoning_score for stat in reasoning_features[:10]],
+        "mean_auc_reasoning_features": float(
+            reduce(np.array([stat.roc_auc for stat in reasoning_features]), "f ->", "mean")
+        )
+        if reasoning_features
+        else 0.0,
+        "mean_cohens_d_reasoning_features": float(
+            reduce(np.array([stat.cohens_d for stat in reasoning_features]), "f ->", "mean")
+        )
+        if reasoning_features
+        else 0.0,
+        "feature_backend": args.feature_backend,
+        "stats_scope": "selected_top_k_features",
+    }
+
+    print(f"\n--- Summary ---")
+    print(f"Total features analyzed: {total_feature_count}")
+    print(f"Selected features with exact stats: {len(exact_stats)}")
+    print(f"Features kept for downstream pipeline: {len(reasoning_features)}")
+
+    if args.save_dir:
+        args.save_dir.mkdir(parents=True, exist_ok=True)
+
+        stats_path = args.save_dir / "feature_stats.json"
+        with open(stats_path, "w") as f:
+            json.dump(
+                {
+                    "summary": {
+                        "total_features": total_feature_count,
+                        "selected_feature_count": len(exact_stats),
+                    },
+                    "features": [stat.to_dict() for stat in exact_stats],
+                },
+                f,
+                indent=2,
+            )
+        print(f"Saved feature statistics to {stats_path}")
+
+        reasoning_path = args.save_dir / "reasoning_features.json"
+        with open(reasoning_path, "w") as f:
+            json.dump(
+                {
+                    "config": {
+                        "model_name": args.model_name,
+                        "feature_backend": args.feature_backend,
+                        "transcoder_set": transcoder_set,
+                        "layer": args.layer,
+                        "reasoning_dataset": args.reasoning_dataset,
+                        "no_filter": args.no_filter,
+                        "min_auc": args.min_auc,
+                        "max_pvalue": args.max_pvalue,
+                        "min_effect_size": args.min_effect_size,
+                    },
+                    "summary": summary,
+                    "feature_indices": [stat.feature_index for stat in reasoning_features],
+                    "features": [stat.to_dict() for stat in reasoning_features],
+                },
+                f,
+                indent=2,
+            )
+        print(f"Saved reasoning features to {reasoning_path}")
+
+        tokens_path = args.save_dir / "token_analysis.json"
+        with open(tokens_path, "w") as f:
+            json.dump(
+                {
+                    "summary": build_token_analysis_summary(feature_token_analyses),
+                    "features": feature_token_analyses,
+                },
+                f,
+                indent=2,
+            )
+        print(f"Saved token analysis to {tokens_path}")
+
+    return reasoning_features, feature_token_analyses
+
+
 def main():
     args = parse_args()
     
@@ -262,7 +465,11 @@ def main():
     print("REASONING FEATURE DETECTION")
     print("=" * 60)
     print(f"Model: {args.model_name}")
-    print(f"SAE: {args.sae_name}")
+    print(f"Feature backend: {args.feature_backend}")
+    if args.feature_backend == "sae":
+        print(f"SAE: {args.sae_name}")
+    else:
+        print(f"Transcoder set: {args.transcoder_set or get_default_transcoder_set(args.feature_backend)}")
     print(f"Layer: {args.layer}")
     print(f"Reasoning dataset: {args.reasoning_dataset}")
     print("=" * 60)
@@ -270,6 +477,10 @@ def main():
     # Create save directory if needed
     if args.save_dir:
         args.save_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.feature_backend != "sae":
+        run_transcoder_feature_search(args)
+        return
     
     # Load or collect activations
     if args.load_activations and args.load_activations.exists():

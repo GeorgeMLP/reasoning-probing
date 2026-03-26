@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reasoning-features"
+version = "0.0.1"
+description = "Reasoning feature falsification experiments"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "datasets",
+    "einops",
+    "jaxtyping",
+    "json-repair",
+    "matplotlib",
+    "numpy",
+    "requests",
+    "sae_lens",
+    "scikit-learn",
+    "scipy",
+    "torch",
+    "torchvision",
+    "tqdm",
+    "transformer_lens",
+    "transformers",
+    "zstandard",
+]
+
+[tool.setuptools.packages.find]
+include = ["reasoning_features*"]

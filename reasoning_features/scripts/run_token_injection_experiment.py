@@ -76,13 +76,13 @@ import sys
 from typing import Optional, Literal
 
 import numpy as np
-import torch
 from einops import reduce
-from jaxtyping import Float, Int
 from tqdm import tqdm
 from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from reasoning_features.features import build_feature_runtime
 
 
 def extract_token_contexts(
@@ -133,13 +133,10 @@ def extract_token_contexts(
 
 
 def extract_active_trigram_sequences(
-    model,
-    sae,
-    tokenizer,
+    runtime,
     reasoning_texts: list[str],
     feature_index: int,
     layer: int,
-    device: str,
     activation_threshold: float = 0.1,
     max_sequences: int = 50,
     max_length: int = 128,
@@ -171,28 +168,14 @@ def extract_active_trigram_sequences(
         if len(sequences) >= max_sequences:
             break
             
-        # Tokenize
-        inputs = tokenizer(
-            text,
-            return_tensors="pt",
-            truncation=True,
+        token_ids, feature_acts = runtime.get_single_feature_sequence(
+            text=text,
+            layer_index=layer,
+            feature_index=feature_index,
             max_length=max_length,
-            padding=False,
-        ).to(device)
-        
-        token_ids = inputs["input_ids"][0].tolist()
+        )
         if len(token_ids) < 4:  # Need at least 3 tokens + BOS
             continue
-        
-        # Get activations
-        with torch.no_grad():
-            _, cache = model.run_with_cache(
-                inputs["input_ids"],
-                names_filter=[f"blocks.{layer}.hook_resid_post"],
-            )
-            hidden = cache[f"blocks.{layer}.hook_resid_post"]
-            sae_acts = sae.encode(hidden)
-            feature_acts = sae_acts[0, :, feature_index].cpu().numpy()
         
         # Compute threshold based on max activation in this text
         max_act = feature_acts.max()
@@ -206,9 +189,9 @@ def extract_active_trigram_sequences(
                 feature_acts[i+1] >= threshold and 
                 feature_acts[i+2] >= threshold):
                 # Decode each token
-                t1 = tokenizer.decode([token_ids[i]])
-                t2 = tokenizer.decode([token_ids[i+1]])
-                t3 = tokenizer.decode([token_ids[i+2]])
+                t1 = runtime.tokenizer.decode([token_ids[i]])
+                t2 = runtime.tokenizer.decode([token_ids[i+1]])
+                t3 = runtime.tokenizer.decode([token_ids[i+2]])
                 
                 # Skip if any token is empty or just whitespace
                 if t1.strip() and t2.strip() and t3.strip():
@@ -274,6 +257,14 @@ def load_top_ngrams_for_feature(
             return [ng["ngram_str"] for ng in ngrams]
     
     return []
+
+
+def get_default_transcoder_set(feature_backend: str) -> str:
+    if feature_backend == "clt":
+        return "mntss/clt-gemma-2-2b-426k"
+    if feature_backend == "plt":
+        return "mntss/gemma-scope-transcoders"
+    raise ValueError(f"No default transcoder set for backend {feature_backend}")
 
 
 def inject_tokens_into_text(
@@ -500,16 +491,13 @@ def inject_tokens_into_text(
 
 
 def get_feature_activation(
-    model,
-    sae,
-    tokenizer,
+    runtime,
     texts: list[str],
     layer: int,
     feature_index: int,
-    device: str,
     batch_size: int = 16,
     max_length: int = 128,
-) -> Float[np.ndarray, "n_texts"]:
+) -> np.ndarray:
     """Get max feature activations for a batch of texts.
     
     Args:
@@ -527,48 +515,27 @@ def get_feature_activation(
         Array of shape (n_texts,) with max activation per text
     """
     activations: list[float] = []
-    hook_name = f"blocks.{layer}.hook_resid_post"
-    
     for i in range(0, len(texts), batch_size):
         batch_texts = texts[i:i+batch_size]
-        
-        tokens = tokenizer(
-            batch_texts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=max_length,
+        activations.extend(
+            runtime.get_feature_max_activations(
+                texts=batch_texts,
+                layer_index=layer,
+                feature_index=feature_index,
+                max_length=max_length,
+            ).tolist()
         )
-        input_ids: Int[torch.Tensor, "batch seq"] = tokens["input_ids"].to(device)
-        attention_mask: Int[torch.Tensor, "batch seq"] = tokens["attention_mask"].to(device)
-        
-        with torch.no_grad():
-            _, cache = model.run_with_cache(input_ids, stop_at_layer=layer + 1)
-            hidden: Float[torch.Tensor, "batch seq d_model"] = cache[hook_name]
-            sae_out: Float[torch.Tensor, "batch seq n_features"] = sae.encode(hidden)
-            
-            # Get max activation per text for the target feature
-            for b in range(sae_out.shape[0]):
-                seq_len = int(attention_mask[b].sum().item())
-                acts: Float[np.ndarray, "seq"] = sae_out[b, :seq_len, feature_index].cpu().numpy()
-                activations.append(float(np.max(acts)))
-        
-        del cache, hidden, sae_out
-        torch.cuda.empty_cache()
     
     return np.array(activations)
 
 
 def run_injection_experiment(
-    model,
-    sae,
-    tokenizer,
+    runtime,
     feature_index: int,
     top_tokens: list[str],
     nonreasoning_texts: list[str],
     reasoning_texts: list[str],
     layer: int,
-    device: str,
     n_inject: int = 3,
     n_inject_bigram: int = 2,
     n_inject_trigram: int = 1,
@@ -623,7 +590,7 @@ def run_injection_experiment(
     
     # Baseline: activation on original non-reasoning text
     baseline_acts = get_feature_activation(
-        model, sae, tokenizer, nonreasoning_texts, layer, feature_index, device,
+        runtime, nonreasoning_texts, layer, feature_index,
         batch_size=batch_size, max_length=max_length
     )
     baseline_mean = float(reduce(baseline_acts, 'samples -> ', 'mean'))
@@ -637,7 +604,7 @@ def run_injection_experiment(
     
     # Target: activation on reasoning text
     reasoning_acts = get_feature_activation(
-        model, sae, tokenizer, reasoning_texts, layer, feature_index, device,
+        runtime, reasoning_texts, layer, feature_index,
         batch_size=batch_size, max_length=max_length
     )
     results["reasoning_mean"] = float(reduce(reasoning_acts, 'samples -> ', 'mean'))
@@ -678,7 +645,7 @@ def run_injection_experiment(
         
         # Measure activation after injection
         injected_acts = get_feature_activation(
-            model, sae, tokenizer, injected_texts, layer, feature_index, device,
+            runtime, injected_texts, layer, feature_index,
             batch_size=batch_size, max_length=max_length
         )
         
@@ -690,6 +657,10 @@ def run_injection_experiment(
         
         # Statistical test: is injection activation significantly higher than baseline?
         t_stat, p_value = stats.ttest_ind(injected_acts, baseline_acts)
+        if np.isnan(t_stat):
+            t_stat = 0.0
+        if np.isnan(p_value):
+            p_value = 1.0
         
         # Effect size (Cohen's d) - primary metric for classification
         # Using pooled standard deviation (assumes equal variances)
@@ -789,8 +760,11 @@ def main():
                         choices=["s1k", "general_inquiry_cot", "combined"],
                         help="Reasoning dataset to use")
     parser.add_argument("--model-name", type=str, default="google/gemma-3-4b-it")
+    parser.add_argument("--feature-backend", choices=["sae", "clt", "plt"], default="sae")
     parser.add_argument("--sae-name", type=str, default="gemma-scope-2-4b-it-res-all")
     parser.add_argument("--sae-id-format", type=str, default="layer_{layer}_width_16k_l0_small")
+    parser.add_argument("--transcoder-set", type=str, default=None,
+                        help="circuit-tracer transcoder set for CLT/PLT backends")
     parser.add_argument("--save-dir", type=str, required=True)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--batch-size", type=int, default=16,
@@ -828,25 +802,20 @@ def main():
     feature_indices = feat_data["feature_indices"][:args.top_k_features]
     print(f"Testing features: {feature_indices}")
     
-    # Load model and SAE
-    print("\nLoading model and SAE...")
-    from sae_lens import SAE, HookedSAETransformer
-    
-    model = HookedSAETransformer.from_pretrained_no_processing(
-        args.model_name,
-        device=args.device,
-        dtype=torch.bfloat16,
+    # Load feature runtime
+    print("\nLoading feature runtime...")
+    transcoder_set = (
+        args.transcoder_set if args.feature_backend != "sae" and args.transcoder_set
+        else (get_default_transcoder_set(args.feature_backend) if args.feature_backend != "sae" else None)
     )
-    
-    sae_id = args.sae_id_format.format(layer=args.layer)
-    sae = SAE.from_pretrained(
-        release=args.sae_name,
-        sae_id=sae_id,
+    runtime = build_feature_runtime(
+        feature_backend=args.feature_backend,
+        model_name=args.model_name,
         device=args.device,
+        sae_name=args.sae_name,
+        sae_id_format=args.sae_id_format,
+        transcoder_set=transcoder_set,
     )
-    if isinstance(sae, tuple):
-        sae = sae[0]
-    tokenizer = model.tokenizer
     
     # Load datasets
     print(f"\nLoading datasets (reasoning: {args.reasoning_dataset})...")
@@ -958,9 +927,9 @@ def main():
             if "active_trigram" in args.strategies:
                 print(f"    Extracting active trigram sequences (threshold={args.active_trigram_threshold})...")
                 active_seqs = extract_active_trigram_sequences(
-                    model, sae, tokenizer,
+                    runtime,
                     reasoning_texts[:50],  # Limit texts for efficiency
-                    feat_idx, args.layer, args.device,
+                    feat_idx, args.layer,
                     activation_threshold=args.active_trigram_threshold,
                     max_sequences=50,
                     max_length=args.max_length,
@@ -982,10 +951,10 @@ def main():
             print(f"    Top trigrams: {feature_trigrams[:2]}...")
         
         result = run_injection_experiment(
-            model, sae, tokenizer,
+            runtime,
             feat_idx, top_tokens,
             nonreasoning_texts, reasoning_texts,
-            args.layer, args.device,
+            args.layer,
             n_inject=args.n_inject,
             n_inject_bigram=args.n_inject_bigram,
             n_inject_trigram=args.n_inject_trigram,
@@ -1022,8 +991,11 @@ def main():
         pct = 100 * count / len(classifications) if classifications else 0
         print(f"  {cls}: {count} ({pct:.1f}%)")
     
-    cohens_d_values = np.array([r["best_cohens_d"] for r in all_results])
-    avg_cohens_d = float(reduce(cohens_d_values, 'features -> ', 'mean'))
+    if all_results:
+        cohens_d_values = np.array([r["best_cohens_d"] for r in all_results])
+        avg_cohens_d = float(reduce(cohens_d_values, 'features -> ', 'mean'))
+    else:
+        avg_cohens_d = 0.0
     print(f"\n  Average best Cohen's d: {avg_cohens_d:.3f}")
     
     # Save results
@@ -1033,6 +1005,8 @@ def main():
     output = {
         "config": {
             "layer": args.layer,
+            "feature_backend": args.feature_backend,
+            "transcoder_set": transcoder_set,
             "reasoning_dataset": args.reasoning_dataset,
             "top_k_features": args.top_k_features,
             "top_k_tokens": args.top_k_tokens,
@@ -1057,8 +1031,12 @@ def main():
                             "weakly_token_driven", "context_dependent"]
             },
             "avg_cohens_d": float(avg_cohens_d),
-            "avg_baseline_activation": float(reduce(np.array([r["baseline_mean"] for r in all_results]), 'features -> ', 'mean')),
-            "avg_reasoning_activation": float(reduce(np.array([r["reasoning_mean"] for r in all_results]), 'features -> ', 'mean')),
+            "avg_baseline_activation": float(
+                reduce(np.array([r["baseline_mean"] for r in all_results]), 'features -> ', 'mean')
+            ) if all_results else 0.0,
+            "avg_reasoning_activation": float(
+                reduce(np.array([r["reasoning_mean"] for r in all_results]), 'features -> ', 'mean')
+            ) if all_results else 0.0,
         },
         "features": all_results,
     }

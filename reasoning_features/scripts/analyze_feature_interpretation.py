@@ -39,12 +39,13 @@ import time
 from typing import Literal
 
 import requests
-import torch
 import numpy as np
 from einops import reduce
 from dataclasses import dataclass, asdict
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from reasoning_features.features import build_feature_runtime
 
 
 @dataclass
@@ -137,36 +138,26 @@ class FeatureAnalyzer:
     
     def __init__(
         self,
-        model,
-        sae,
-        tokenizer,
+        runtime,
         llm_client: LLMClient,
         layer: int,
         device: str = "cuda",
     ):
-        self.model = model
-        self.sae = sae
-        self.tokenizer = tokenizer
+        self.runtime = runtime
+        self.tokenizer = runtime.tokenizer
         self.llm = llm_client
         self.layer = layer
         self.device = device
     
     def get_activation(self, text: str, feature_index: int) -> tuple[float, float, list]:
         """Get feature activation for a text."""
-        inputs = self.tokenizer(
-            text, return_tensors="pt", truncation=True, max_length=128
-        ).to(self.device)
-        
-        with torch.no_grad():
-            _, cache = self.model.run_with_cache(
-                inputs["input_ids"],
-                names_filter=[f"blocks.{self.layer}.hook_resid_post"],
-            )
-            hidden = cache[f"blocks.{self.layer}.hook_resid_post"]
-            sae_acts = self.sae.encode(hidden)
-            acts = sae_acts[0, :, feature_index].cpu().numpy()
-        
-        tokens = [self.tokenizer.decode([t]) for t in inputs["input_ids"][0].tolist()]
+        token_ids, acts = self.runtime.get_single_feature_sequence(
+            text=text,
+            layer_index=self.layer,
+            feature_index=feature_index,
+            max_length=128,
+        )
+        tokens = [self.tokenizer.decode([t]) for t in token_ids]
         
         # Get top activating tokens
         top_indices = np.argsort(acts)[-5:][::-1]
@@ -187,21 +178,12 @@ class FeatureAnalyzer:
         examples = []
         
         for text in reasoning_texts[:500]:
-            # Get full activation data
-            inputs = self.tokenizer(
-                text, return_tensors="pt", truncation=True, max_length=128
-            ).to(self.device)
-            
-            with torch.no_grad():
-                _, cache = self.model.run_with_cache(
-                    inputs["input_ids"],
-                    names_filter=[f"blocks.{self.layer}.hook_resid_post"],
-                )
-                hidden = cache[f"blocks.{self.layer}.hook_resid_post"]
-                sae_acts = self.sae.encode(hidden)
-                acts = sae_acts[0, :, feature_index].cpu().numpy()
-            
-            token_ids = inputs["input_ids"][0].tolist()
+            token_ids, acts = self.runtime.get_single_feature_sequence(
+                text=text,
+                layer_index=self.layer,
+                feature_index=feature_index,
+                max_length=128,
+            )
             tokens = [self.tokenizer.decode([tid]) for tid in token_ids]
             
             max_act = float(acts.max())
@@ -724,6 +706,14 @@ def load_token_data(token_analysis_path: Path, feature_index: int) -> list[str]:
     return []
 
 
+def get_default_transcoder_set(feature_backend: str) -> str:
+    if feature_backend == "clt":
+        return "mntss/clt-gemma-2-2b-426k"
+    if feature_backend == "plt":
+        return "mntss/gemma-scope-transcoders"
+    raise ValueError(f"No default transcoder set for backend {feature_backend}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="LLM-guided feature interpretation and counterexample discovery"
@@ -745,8 +735,11 @@ def main():
     # Model configuration
     parser.add_argument("--layer", type=int, required=True)
     parser.add_argument("--model-name", default="google/gemma-3-4b-it")
+    parser.add_argument("--feature-backend", choices=["sae", "clt", "plt"], default="sae")
     parser.add_argument("--sae-name", default="gemma-scope-2-4b-it-res-all")
     parser.add_argument("--sae-id-format", default="layer_{layer}_width_16k_l0_small")
+    parser.add_argument("--transcoder-set", default=None,
+                        help="circuit-tracer transcoder set for CLT/PLT backends")
     parser.add_argument("--device", default="cuda")
     
     # LLM configuration
@@ -784,26 +777,20 @@ def main():
     feature_indices = load_feature_indices(args)[:args.max_features]
     print(f"Analyzing {len(feature_indices)} features: {feature_indices}")
     
-    # Load model and SAE
-    print("\nLoading model and SAE...")
-    from sae_lens import SAE, HookedSAETransformer
-    
-    model = HookedSAETransformer.from_pretrained_no_processing(
-        args.model_name,
-        device=args.device,
-        dtype=torch.bfloat16,
+    # Load feature runtime
+    print("\nLoading feature runtime...")
+    transcoder_set = (
+        args.transcoder_set if args.feature_backend != "sae" and args.transcoder_set
+        else (get_default_transcoder_set(args.feature_backend) if args.feature_backend != "sae" else None)
     )
-    
-    sae_id = args.sae_id_format.format(layer=args.layer)
-    sae = SAE.from_pretrained(
-        release=args.sae_name,
-        sae_id=sae_id,
+    runtime = build_feature_runtime(
+        feature_backend=args.feature_backend,
+        model_name=args.model_name,
         device=args.device,
+        sae_name=args.sae_name,
+        sae_id_format=args.sae_id_format,
+        transcoder_set=transcoder_set,
     )
-    if isinstance(sae, tuple):
-        sae = sae[0]
-    
-    tokenizer = model.tokenizer
     print("Loaded!")
     
     # Load reasoning texts
@@ -837,7 +824,7 @@ def main():
     
     # Initialize analyzer
     llm_client = LLMClient(api_key, args.llm_model)
-    analyzer = FeatureAnalyzer(model, sae, tokenizer, llm_client, args.layer, args.device)
+    analyzer = FeatureAnalyzer(runtime, llm_client, args.layer, args.device)
     
     # Analyze each feature
     results = []
@@ -878,6 +865,8 @@ def main():
                     "config": {
                         "layer": args.layer,
                         "model": args.model_name,
+                        "feature_backend": args.feature_backend,
+                        "transcoder_set": transcoder_set,
                         "llm_model": args.llm_model,
                         "max_iterations": args.max_iterations,
                         "min_false_positives": args.min_false_positives,
