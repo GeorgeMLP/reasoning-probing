@@ -76,6 +76,30 @@ class FeatureInterpretation:
     high_activation_examples: list[dict]  # For visualization consistency
 
 
+def build_error_interpretation(
+    feature_index: int,
+    summary: str,
+    details: str,
+    high_activation_examples: list[dict] | None = None,
+) -> FeatureInterpretation:
+    """Build a fallback interpretation so failed features are not silently skipped."""
+
+    return FeatureInterpretation(
+        feature_index=feature_index,
+        initial_hypothesis=summary,
+        refined_interpretation=details,
+        activates_on=[],
+        does_not_activate_on=[],
+        false_positive_examples=[],
+        false_negative_examples=[],
+        confidence="LOW",
+        is_genuine_reasoning_feature=False,
+        summary=summary,
+        iterations_used=0,
+        high_activation_examples=high_activation_examples or [],
+    )
+
+
 class LLMClient:
     """Client for calling OpenRouter API."""
     
@@ -174,8 +198,8 @@ class FeatureAnalyzer:
         n_examples: int = 10,
         n_tokens_visualize: int = 40,
     ) -> list[dict]:
-        """Collect examples of high activation with full token-level information for visualization."""
-        examples = []
+        """Collect top activating examples with an adaptive threshold."""
+        candidates = []
         
         for text in reasoning_texts[:500]:
             token_ids, acts = self.runtime.get_single_feature_sequence(
@@ -187,43 +211,53 @@ class FeatureAnalyzer:
             tokens = [self.tokenizer.decode([tid]) for tid in token_ids]
             
             max_act = float(acts.max())
-            
-            if max_act > 5:
-                # Find window with highest mean activation for visualization
-                if len(acts) > n_tokens_visualize:
-                    window_means = []
-                    for i in range(len(acts) - n_tokens_visualize + 1):
-                        window_mean = np.mean(acts[i:i + n_tokens_visualize])
-                        window_means.append(window_mean)
-                    
-                    max_mean = np.max(window_means)
-                    argwhere = np.argwhere(np.isclose(window_means, max_mean))
-                    best_start = int(argwhere[len(argwhere) // 2].item())
-                    best_end = best_start + n_tokens_visualize
-                    
-                    window_tokens = tokens[best_start:best_end]
-                    window_acts = acts[best_start:best_end].tolist()
-                else:
-                    window_tokens = tokens
-                    window_acts = acts.tolist()
-                
-                # Get top activating tokens (for LLM display)
-                top_indices = np.argsort(acts)[-5:][::-1]
-                top_tokens = [(tokens[i], float(acts[i])) for i in top_indices if acts[i] > 0]
-                
-                examples.append({
-                    "text": text[:500],
-                    "max_activation": max_act,
-                    "mean_activation": float(np.mean(acts)),
-                    "top_tokens": top_tokens[:10],
-                    # For visualization
-                    "visualization_tokens": window_tokens,
-                    "visualization_activations": window_acts,
-                })
-        
-        # Sort by activation and return top N
-        examples.sort(key=lambda x: x["max_activation"], reverse=True)
-        return examples[:n_examples]
+            if max_act <= 0:
+                continue
+
+            # Find window with highest mean activation for visualization
+            if len(acts) > n_tokens_visualize:
+                window_means = []
+                for i in range(len(acts) - n_tokens_visualize + 1):
+                    window_mean = np.mean(acts[i:i + n_tokens_visualize])
+                    window_means.append(window_mean)
+
+                max_mean = np.max(window_means)
+                argwhere = np.argwhere(np.isclose(window_means, max_mean))
+                best_start = int(argwhere[len(argwhere) // 2].item())
+                best_end = best_start + n_tokens_visualize
+
+                window_tokens = tokens[best_start:best_end]
+                window_acts = acts[best_start:best_end].tolist()
+            else:
+                window_tokens = tokens
+                window_acts = acts.tolist()
+
+            # Get top activating tokens (for LLM display)
+            top_indices = np.argsort(acts)[-5:][::-1]
+            top_tokens = [(tokens[i], float(acts[i])) for i in top_indices if acts[i] > 0]
+
+            candidates.append({
+                "text": text[:500],
+                "max_activation": max_act,
+                "mean_activation": float(np.mean(acts)),
+                "top_tokens": top_tokens[:10],
+                "visualization_tokens": window_tokens,
+                "visualization_activations": window_acts,
+            })
+
+        if not candidates:
+            return []
+
+        candidates.sort(key=lambda x: x["max_activation"], reverse=True)
+        if len(candidates) <= n_examples:
+            return candidates
+
+        positive_maxes = np.array([example["max_activation"] for example in candidates], dtype=np.float32)
+        adaptive_threshold = float(np.quantile(positive_maxes, 0.8))
+        filtered = [example for example in candidates if example["max_activation"] >= adaptive_threshold]
+        if len(filtered) >= n_examples:
+            return filtered[:n_examples]
+        return candidates[:n_examples]
     
     def generate_hypothesis(
         self, 
@@ -714,6 +748,41 @@ def get_default_transcoder_set(feature_backend: str) -> str:
     raise ValueError(f"No default transcoder set for backend {feature_backend}")
 
 
+def build_results_summary(results: list[dict], requested_feature_count: int) -> dict:
+    """Compute the saved summary for interpretation results."""
+
+    iterations_list = [result.get("iterations_used", 0) for result in results]
+    max_iterations_required = max(iterations_list) if iterations_list else 0
+    return {
+        "total_features_analyzed": len(results),
+        "requested_feature_count": requested_feature_count,
+        "genuine_reasoning_features": sum(1 for result in results if result.get("is_genuine_reasoning_feature")),
+        "non_reasoning_features": sum(1 for result in results if not result.get("is_genuine_reasoning_feature")),
+        "high_confidence": sum(1 for result in results if result.get("confidence") == "HIGH"),
+        "medium_confidence": sum(1 for result in results if result.get("confidence") == "MEDIUM"),
+        "low_confidence": sum(1 for result in results if result.get("confidence") == "LOW"),
+        "total_false_positives": sum(len(result.get("false_positive_examples", [])) for result in results),
+        "total_false_negatives": sum(len(result.get("false_negative_examples", [])) for result in results),
+        "max_iterations_required": round(max_iterations_required, 2),
+    }
+
+
+def save_results(output_path: Path, summary: dict, config: dict, results: list[dict]) -> None:
+    """Persist interpretation results to disk."""
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(
+            {
+                "summary": summary,
+                "config": config,
+                "features": results,
+            },
+            f,
+            indent=2,
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="LLM-guided feature interpretation and counterexample discovery"
@@ -774,7 +843,14 @@ def main():
         raise ValueError("OPENROUTER_API_KEY environment variable not set")
     
     # Load feature indices
-    feature_indices = load_feature_indices(args)[:args.max_features]
+    requested_feature_indices = load_feature_indices(args)
+    seen = set()
+    deduped_feature_indices = []
+    for feature_index in requested_feature_indices:
+        if feature_index not in seen:
+            deduped_feature_indices.append(feature_index)
+            seen.add(feature_index)
+    feature_indices = deduped_feature_indices[:args.max_features]
     print(f"Analyzing {len(feature_indices)} features: {feature_indices}")
     
     # Load feature runtime
@@ -825,6 +901,18 @@ def main():
     # Initialize analyzer
     llm_client = LLMClient(api_key, args.llm_model)
     analyzer = FeatureAnalyzer(runtime, llm_client, args.layer, args.device)
+    output_config = {
+        "layer": args.layer,
+        "model": args.model_name,
+        "feature_backend": args.feature_backend,
+        "transcoder_set": transcoder_set,
+        "requested_feature_count": len(feature_indices),
+        "llm_model": args.llm_model,
+        "max_iterations": args.max_iterations,
+        "min_false_positives": args.min_false_positives,
+        "min_false_negatives": args.min_false_negatives,
+        "threshold_ratio": args.threshold_ratio,
+    }
     
     # Analyze each feature
     results = []
@@ -842,40 +930,6 @@ def main():
                 threshold_ratio=args.threshold_ratio,
             )
             results.append(asdict(interpretation))
-            
-            # Build summary
-            iterations_list = [r.get("iterations_used", 0) for r in results]
-            max_iterations_required = max(iterations_list) if iterations_list else 0
-            summary = {
-                "total_features_analyzed": len(results),
-                "genuine_reasoning_features": sum(1 for r in results if r.get("is_genuine_reasoning_feature")),
-                "non_reasoning_features": sum(1 for r in results if not r.get("is_genuine_reasoning_feature")),
-                "high_confidence": sum(1 for r in results if r.get("confidence") == "HIGH"),
-                "medium_confidence": sum(1 for r in results if r.get("confidence") == "MEDIUM"),
-                "low_confidence": sum(1 for r in results if r.get("confidence") == "LOW"),
-                "total_false_positives": sum(len(r.get("false_positive_examples", [])) for r in results),
-                "total_false_negatives": sum(len(r.get("false_negative_examples", [])) for r in results),
-                "max_iterations_required": round(max_iterations_required, 2),
-            }
-            
-            # Save intermediate results
-            with open(args.output, "w") as f:
-                json.dump({
-                    "summary": summary,
-                    "config": {
-                        "layer": args.layer,
-                        "model": args.model_name,
-                        "feature_backend": args.feature_backend,
-                        "transcoder_set": transcoder_set,
-                        "llm_model": args.llm_model,
-                        "max_iterations": args.max_iterations,
-                        "min_false_positives": args.min_false_positives,
-                        "min_false_negatives": args.min_false_negatives,
-                        "threshold_ratio": args.threshold_ratio,
-                    },
-                    "features": results,
-                }, f, indent=2)
-            
             # Rate limiting
             time.sleep(2)
             
@@ -883,25 +937,26 @@ def main():
             print(f"Error analyzing feature {feature_index}: {e}")
             import traceback
             traceback.print_exc()
+            results.append(asdict(build_error_interpretation(
+                feature_index=feature_index,
+                summary="Feature analysis failed",
+                details=f"Feature analysis failed with error: {type(e).__name__}: {e}",
+            )))
+        finally:
+            save_results(
+                args.output,
+                build_results_summary(results, len(feature_indices)),
+                output_config,
+                results,
+            )
     
     # Final summary
     print("\n" + "=" * 60)
     print("ANALYSIS COMPLETE")
     print("=" * 60)
     
-    iterations_list = [r.get("iterations_used", 0) for r in results]
-    max_iterations_required = max(iterations_list) if iterations_list else 0
-    final_summary = {
-        "total_features_analyzed": len(results),
-        "genuine_reasoning_features": sum(1 for r in results if r.get("is_genuine_reasoning_feature")),
-        "non_reasoning_features": sum(1 for r in results if not r.get("is_genuine_reasoning_feature")),
-        "high_confidence": sum(1 for r in results if r.get("confidence") == "HIGH"),
-        "medium_confidence": sum(1 for r in results if r.get("confidence") == "MEDIUM"),
-        "low_confidence": sum(1 for r in results if r.get("confidence") == "LOW"),
-        "total_false_positives": sum(len(r.get("false_positive_examples", [])) for r in results),
-        "total_false_negatives": sum(len(r.get("false_negative_examples", [])) for r in results),
-        "max_iterations_required": round(max_iterations_required, 2),
-    }
+    final_summary = build_results_summary(results, len(feature_indices))
+    save_results(args.output, final_summary, output_config, results)
     
     print(f"Total features analyzed: {final_summary['total_features_analyzed']}")
     print(f"Genuine reasoning features: {final_summary['genuine_reasoning_features']}")
