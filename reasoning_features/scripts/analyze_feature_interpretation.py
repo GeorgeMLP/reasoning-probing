@@ -103,7 +103,7 @@ def build_error_interpretation(
 class LLMClient:
     """Client for calling OpenRouter API."""
     
-    def __init__(self, api_key: str, model: str = "google/gemini-3-pro-preview"):
+    def __init__(self, api_key: str, model: str = "google/gemini-3.1-pro-preview"):
         self.api_key = api_key
         self.model = model
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
@@ -812,7 +812,7 @@ def main():
     parser.add_argument("--device", default="cuda")
     
     # LLM configuration
-    parser.add_argument("--llm-model", default="google/gemini-3-pro-preview",
+    parser.add_argument("--llm-model", default="google/gemini-3.1-pro-preview",
                         help="OpenRouter model to use for analysis")
     
     # Analysis configuration
