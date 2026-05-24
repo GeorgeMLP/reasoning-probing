@@ -1,6 +1,6 @@
-# Falsifying Sparse Autoencoder Reasoning Features in Language Models
+# Do Sparse Autoencoders Identify Reasoning Features in Language Models?
 
-This repository contains the code and experimental framework for our paper, [*Falsifying Sparse Autoencoder Reasoning Features in Language Models*](https://arxiv.org/abs/2601.05679), which investigates whether Sparse Autoencoders (SAEs) capture genuine reasoning features in language models, or merely learn spurious correlations with reasoning-associated tokens.
+This repository contains the code and experimental framework for our paper, [*Do Sparse Autoencoders Identify Reasoning Features in Language Models?*](https://arxiv.org/abs/2601.05679), which investigates whether Sparse Autoencoders (SAEs) capture genuine reasoning features in language models, or merely learn spurious correlations with reasoning-associated tokens.
 
 A related repository studying the geometry of reasoning manifolds in language models is available at https://github.com/GeorgeMLP/reasoning-dimension.
 
@@ -157,10 +157,10 @@ All experiments were conducted on a single NVIDIA A100 80GB GPU.
 If you use this code or findings in your research, please cite:
 
 ```bibtex
-@article{ma2026falsifying,
-    title={{Falsifying Sparse Autoencoder Reasoning Features in Language Models}},
+@inproceedings{ma2026sparse,
+    title={{Do Sparse Autoencoders Identify Reasoning Features in Language Models?}},
     author={Ma, George and Liang, Zhongyuan and Chen, Irene Y. and Sojoudi, Somayeh},
-    journal={arXiv preprint arXiv:2601.05679},
+    booktitle={Proceedings of the Forty-Third International Conference on Machine Learning},
     year={2026}
 }
 ```
